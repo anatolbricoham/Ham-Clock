@@ -4,13 +4,13 @@
 
 A HamClock-inspired ham radio dashboard for the ESP32 Cheap Yellow Display, supporting both the 2.8" ESP32-2432S028R and the 4.0" 320x480 ST7796S variant from a single source tree.
 
-**[Flash it in your browser with the Web Flasher](https://henryscat.github.io/)**
+**[Flash it in your browser with the Web Flasher](https://bricohams.github.io/)**
 
 It provides a touch-controlled landscape dashboard — 320x240 on the 2.8" board, 480x320 on the 4.0" — with UTC/local time, HamQSL propagation data, a greyline map, DX spots, Wi-Fi setup, and a local web settings page. The 4.0" board uses the extra room rather than simply scaling up: larger text on the data pages, and twelve DX/POTA spots in place of eight.
 
-<a href="https://www.buymeacoffee.com/Henrys_Cat" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+<a href="https://www.buymeacoffee.com/bricohams" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
-https://github.com/user-attachments/assets/772c46cd-7d77-45ed-b29a-c5d189fbcf8b
+
 
 ## Features
 
