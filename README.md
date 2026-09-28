@@ -1,2 +1,610 @@
-# Ham-Clock
-ESP32-2432S028R / CYD ILI9341 display support
+# CYD Ham Dashboard – BricoHams edition
+
+> **BricoHams edition** of the CYD Ham Dashboard, maintained by the BricoHams group with thanks to **EA5JEF, Diego**. It is based on the original project by [HenrysCat](https://github.com/HenrysCat/esp32-cyd-ham-dashboard) – many thanks for creating it. Documentation and the configuration manual are in [`docs/`](docs/README.md); full acknowledgements in [CREDITS.md](CREDITS.md).
+
+A HamClock-inspired ham radio dashboard for the ESP32 Cheap Yellow Display, supporting both the 2.8" ESP32-2432S028R and the 4.0" 320x480 ST7796S variant from a single source tree.
+
+**[Flash it in your browser with the Web Flasher](https://henryscat.github.io/)**
+
+It provides a touch-controlled landscape dashboard — 320x240 on the 2.8" board, 480x320 on the 4.0" — with UTC/local time, HamQSL propagation data, a greyline map, DX spots, Wi-Fi setup, and a local web settings page. The 4.0" board uses the extra room rather than simply scaling up: larger text on the data pages, and twelve DX/POTA spots in place of eight.
+
+<a href="https://www.buymeacoffee.com/Henrys_Cat" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+
+https://github.com/user-attachments/assets/772c46cd-7d77-45ed-b29a-c5d189fbcf8b
+
+## Features
+
+- ESP32-2432S028R / CYD ILI9341 display support
+- XPT2046 touch navigation
+- Thirteen dashboard pages, plus an optional ISS tracker:
+  - Clock
+  - HF Propagation from HamQSL
+  - VHF Conditions from HamQSL
+  - Greyline map with QTH marker, sun marker, terminator, sunrise/sunset, and day/night status
+  - PSKReporter reception reports for your callsign, plotted on the same world map
+  - ISS Tracker: current position and ground track on the same world map, plus upcoming passes (optional; hidden until a free N2YO API key is set)
+  - DX spots from JSON and/or a persistent Telnet DX Cluster connection
+  - POTA activator spots, with an optional distance filter from your locator
+  - OpenWebRX status and live chat
+  - DMR Last Heard from compatible hotspots
+  - World Clock with UTC and ten city clocks
+  - Nearest APRS weather station and recent weather data
+  - Nearby APRS nodes and stations, ordered by distance from your locator
+  - Live APRS map: range-ring view centred on your QTH with every station heard in the last hour (tap to zoom)
+- Captive portal Wi-Fi setup with up to five remembered networks; it automatically joins a saved network in range and switches off the hotspot a few seconds after connection (it can be switched back on from the web settings page if you need it again)
+- Local web settings page on the device IP
+- Hold the BOOT button on the back of the board for 5 seconds to factory reset all settings
+- Optional mDNS address: `http://cyd-ham.local/`
+- NTP time sync
+- Configurable callsign, locator, timezone, data URLs, refresh intervals, and brightness
+- Optional automatic page change, cycling only the pages you tick at your chosen interval
+- Optional night dimming, fading the backlight between a day and a night level across sunrise and sunset
+- Settings stored in ESP32 non-volatile preferences
+- No LVGL, SD card, or external filesystem required
+
+## Hardware
+
+Three tested targets, all ESP32-WROOM based with an XPT2046 resistive touch controller:
+
+| Board | Panel | PlatformIO env | Setup header |
+| --- | --- | --- | --- |
+| ESP32-2432S028R 2.8" | ILI9341 320x240 | `esp32-2432s028r` | `include/User_Setup.h` |
+| ESP32-2432S028R 2.8" | ST7789 320x240 | `esp32-2432s028r-st7789` | `include/User_Setup_ST7789.h` |
+| CYD 4.0" | ST7796S 480x320 | `esp32-4in-st7796` | `include/User_Setup_ST7796.h` |
+
+TFT_eSPI binds its panel driver at compile time, so the board is chosen by the
+environment you build, not at runtime. Each environment force-includes its own
+setup header, which carries the pins, the panel size, and the `DISPLAY_W` /
+`DISPLAY_H` values the page layouts are derived from. Everything board-specific
+lives in those headers rather than in the source.
+
+### 2.8" wiring (ESP32-2432S028R)
+
+| Signal | GPIO |
+| --- | ---: |
+| TFT MISO | 12 |
+| TFT MOSI | 13 |
+| TFT SCLK | 14 |
+| TFT CS | 15 |
+| TFT DC | 2 |
+| TFT RST | -1 |
+| TFT backlight | 21 |
+| Touch SCLK | 25 |
+| Touch MOSI | 32 |
+| Touch MISO | 39 |
+| Touch CS | 33 |
+| Touch IRQ | 36 |
+
+### 4.0" wiring (ST7796S)
+
+The display pins match the 2.8" board. The two differences are the backlight,
+which moves to GPIO 27, and the touch controller, which shares the display's
+SPI bus instead of having its own. `dashboard_display.cpp` detects the shared
+bus by comparing the touch pins against the TFT pins, and uses
+`TFT_eSPI::getSPIinstance()` rather than starting a second bus.
+
+| Signal | GPIO |
+| --- | ---: |
+| TFT MISO | 12 |
+| TFT MOSI | 13 |
+| TFT SCLK | 14 |
+| TFT CS | 15 |
+| TFT DC | 2 |
+| TFT RST | -1 |
+| TFT backlight | **27** |
+| Touch SCLK | **14** (shared) |
+| Touch MOSI | **13** (shared) |
+| Touch MISO | **12** (shared) |
+| Touch CS | 33 |
+| Touch IRQ | 36 |
+
+This board also sets `USE_HSPI_PORT`. GPIO 12/13/14/15 are the ESP32's native
+HSPI pins, so the peripheral can drive them through IOMUX and run the panel at
+80MHz; without it TFT_eSPI defaults to VSPI, routes the signals through the GPIO
+matrix, and the display breaks up into coloured noise above about 27MHz.
+
+Some CYD variants use different pins. If the display is blank, white, mirrored, or touch is wrong, check your board revision and adjust the setup header for your environment and the touch constants in `src/dashboard_display.cpp`.
+
+### Setup hotspot and factory reset
+
+On first boot (or whenever no Wi-Fi is configured), the device broadcasts a `CYD-HamClock-Setup` access point (password `hamclock`) so you can join it and open the captive portal to enter your Wi-Fi details. Once the device confirms it has joined your network, the hotspot automatically switches off. To bring it back later — for example to reach the settings page again without your router — check "Keep the setup hotspot switched on" in the Station section of the web settings page.
+
+The board's BOOT button (GPIO0, on the back next to the USB connector) doubles as a factory reset button: hold it down for 5 seconds while the dashboard is running to wipe all saved settings (Wi-Fi credentials, callsign, locator, timezone, data sources, brightness) and reboot to defaults. The screen shows a countdown while the button is held; release early to cancel.
+
+## Flashing A Release Binary
+
+If a `.bin` firmware file is attached to a GitHub release, you can flash it without building from source. The panel driver is compiled in, so each board has its own binary — check the release notes and pick the one matching your display, as the wrong binary will boot but show nothing usable.
+
+Install `esptool`:
+
+```sh
+python -m pip install esptool
+```
+
+Put the board into normal USB flashing mode, then flash the release binary. Replace `COM5` and the filename as needed:
+
+```sh
+esptool.py --chip esp32 --port COM5 --baud 460800 write_flash -z 0x10000 firmware.bin
+```
+
+If the release includes bootloader and partition binaries, use the release instructions for those exact offsets. For PlatformIO-built firmware, the application binary normally goes at `0x10000`.
+
+After flashing, the board will start its setup access point if Wi-Fi is not configured.
+
+## Building From Source
+
+Install:
+
+- VS Code
+- PlatformIO extension
+- USB serial driver for your ESP32 board if required
+
+Clone the repository and open it in VS Code.
+
+Copy the example config to a git-ignored local override file:
+
+```sh
+copy include\app_config.example.h include\app_config.local.h
+```
+
+On macOS/Linux:
+
+```sh
+cp include/app_config.example.h include/app_config.local.h
+```
+
+Set per-device Wi-Fi, locator, callsign, timezone, service URLs, and API keys in `include/app_config.local.h`. That file is ignored by Git. Alternatively, configure Wi-Fi and dashboard settings from the captive portal or local web page.
+
+Build. With no environment given this builds **all three**, which is a useful
+check that a change suits every board but is not what you want before a flash:
+
+```sh
+pio run
+```
+
+Build and upload one board. Always pass `-e`, or the upload runs for each
+environment in turn and leaves the last one on the board:
+
+```sh
+pio run -e esp32-2432s028r      -t upload   # 2.8" ILI9341
+pio run -e esp32-2432s028r-st7789 -t upload # 2.8" ST7789
+pio run -e esp32-4in-st7796     -t upload   # 4.0" ST7796S
+```
+
+Open Serial Monitor:
+
+```sh
+pio device monitor
+```
+
+## First Boot And Wi-Fi Setup
+
+The ESP32 starts a setup access point while also trying to connect to saved Wi-Fi credentials.
+
+- AP name: `CYD-HamClock-Setup`
+- AP password: `hamclock`
+- Portal address: `http://192.168.4.1`
+
+Join the setup AP from a phone or computer. The captive portal may open automatically. If it does not, browse to:
+
+```text
+http://192.168.4.1
+```
+
+The setup page lets you configure:
+
+- Callsign
+- Up to five Wi-Fi SSID/password pairs; existing saved networks remain available when adding another one
+- Timezone preset, label, and POSIX timezone rule
+- Maidenhead locator
+- 12-hour or 24-hour local clock on the clock page
+- Propagation data source
+- DX source mode, JSON URL, and Telnet host/port
+- Refresh intervals
+- Automatic page change, with the dwell in seconds and which pages take part
+- Backlight brightness, and optional night dimming with its own level and fade length
+- Display colour swap/invert and orientation (90-degree rotate, 180-degree flip, mirror) for differently wired CYD panels
+- Touch page navigation direction swap for differently wired touch controller variants
+
+Settings are saved to ESP32 Preferences and persist after reboot.
+Saved Wi-Fi passwords are never displayed. Leave a password field blank to keep it, use its checkbox to clear it for an open network, or clear its SSID to remove that remembered network.
+
+## Local Web Settings
+
+When connected to Wi-Fi, the same settings page is available on your LAN:
+
+```text
+http://device-ip/
+```
+
+The clock page shows the current IP address. If mDNS starts successfully, this address may also work:
+
+```text
+http://cyd-ham.local/
+```
+
+Available routes:
+
+- `GET /` - settings and status page
+- `POST /save` - save settings
+- `GET /status` - JSON status
+- `POST /reboot` - restart the ESP32
+
+This web UI is intended for a trusted local network. It does not include authentication.
+
+## Touch Controls
+
+- Tap left side: next page
+- Tap right side: previous page
+- Tap centre on HF Propagation or VHF Conditions page: manual propagation refresh
+- Tap centre on DX Spots page: manual DX refresh
+- Tap centre on PSKReporter page: queue a manual PSKReporter refresh (it runs once the five minute minimum interval has elapsed)
+- Tap centre on ISS Tracker page: manual position and pass refresh
+- Tap centre on POTA Spots page: manual POTA refresh
+
+The footer shows Wi-Fi status, NTP status, and current page number. On every page except the Clock it also shows the current UTC time (the Clock page omits this since it already shows a full UTC readout above).
+
+The Automatic Page Change section of the web settings page can cycle the dashboard on its own. Set how many seconds each page is shown (3 to 600) and tick which pages take part; unticked pages are skipped by the cycle but are still reachable by tapping. The ISS Tracker page is the one exception: while it is switched off, or has no API key set, it is left out of both the cycle and the left/right tap navigation entirely, rather than just being unticked. Any tap restarts the countdown, so a page being read is not pulled away mid-look.
+
+If a DX or POTA row is part way through scrolling in when the countdown expires, the change waits for the list to settle rather than cutting the slide off, then turns the page immediately. A three second grace cap keeps a busy Telnet feed from parking the rotation on one page.
+
+## Night Dimming
+
+The Display section of the web settings page can fade the backlight down after dark. Set a night brightness percent and a fade length in minutes, and the backlight moves between the daytime brightness and the night level across a window centred on each crossing: a 40 minute fade starts 20 minutes before sunset and finishes 20 minutes after, then reverses at sunrise.
+
+Sunrise and sunset come from your Maidenhead locator, the same figures the Greyline page shows, so set the locator correctly first. The settings page prints the current sun state and today's sunrise and sunset next to the controls. Before NTP has synced, or with dimming switched off, the daytime brightness is used.
+
+The `/status` endpoint reports `backlight` (the level actually being driven, which sits between the two settings during a fade) and `sun`, so the fade can be watched at dusk without staring at the panel.
+
+## Dashboard Pages
+
+### Clock
+
+Shows:
+
+- Large UTC time
+- Configured local time, in 24-hour or 12-hour with AM/PM (web settings page, Time and Location)
+- Date
+- Callsign and Maidenhead locator
+- Device IP
+- Uptime
+- Wi-Fi/NTP/footer status
+
+### HF Propagation
+
+Fetches HamQSL data directly by default:
+
+```text
+https://www.hamqsl.com/solarxml.php
+```
+
+Displays:
+
+- SFI
+- A index
+- K index
+- X-Ray
+- Sunspots
+- Solar wind speed (SW) and magnetic-field Bz
+- Geomag
+- Noise
+- Aurora
+- HamQSL band condition groups for day/night
+- Last update time and status
+
+An optional JSON proxy URL can be configured from the web page.
+
+### VHF Conditions
+
+Same layout and data source as HF Propagation, sharing the same refresh cycle and JSON proxy setting.
+
+Displays:
+
+- SFI, A index, K index, X-Ray, Sunspots, Solar wind/Bz, Geomag, Noise, Aurora (identical top rows to HF Propagation)
+- HamQSL VHF phenomena: VHF Aurora (with auroral latitude, when supplied), and E-Skip conditions for 6m Europe, 4m Europe, 2m Europe, and 2m North America
+- Last update time and status
+
+### Greyline
+
+Calculates locally using the configured Maidenhead locator and NTP time.
+
+Displays:
+
+- Bitmap-style world map
+- QTH marker
+- Sun/subsolar marker
+- Day/night terminator
+- Night-side shading
+- Sunrise, sunset, UTC time
+- Location/daylight/greyline status
+
+Changing the Maidenhead locator refreshes the Greyline calculations and map immediately; no reboot is required.
+
+### PSKReporter
+
+Plots recent PSKReporter reception reports for the configured callsign on the same world map the Greyline page uses.
+
+Displays:
+
+- One marker per four-character grid square, coloured by band
+- QTH marker
+- Grid and report counts for the selected time window
+- Furthest report (callsign, locator, great-circle distance)
+- A legend naming only the bands currently present, each in its marker colour
+
+Settings:
+
+- `Direction`: `Who is hearing me` (default) queries `senderCallsign`; `Who I am hearing` queries `receiverCallsign`
+- `Report window minutes`: how far back to ask for, 5 to 360, default 60
+- `PSKReporter refresh minutes`: 5 to 120, default 5
+- `Contact email`: optional, sent as `appcontact`
+
+The page needs a callsign to work. With the callsign field blank it shows the map and a prompt to set one, and makes no requests.
+
+### APRS Weather and Nearby Stations
+
+Both pages use a receive-only TCP connection to APRS-IS with the standard
+`pass -1` login and a server-side radius filter centered on the configured
+Maidenhead locator. The Station callsign is used to identify the client; the
+dashboard never transmits or gates packets. The connection starts the first
+time an APRS page is opened and remains active in the background while Wi-Fi is
+connected, so weather beacons can arrive between carousel visits.
+
+`APRS nearby radius` in web settings accepts 10 to 300 km (default 100 km).
+The weather page selects the closest weather-bearing position packet and shows
+available APRS weather fields in metric units. The nearby page lists up to six
+stations, sorted by distance; comments containing common digipeater, LoRa, DMR,
+or repeater identifiers are labelled as nodes. Data availability depends on
+stations transmitting within range and APRS-IS connectivity.
+
+An optional personal APRS.fi API key can enrich the nearest station's weather
+data. The key is requested only while the weather page is active, no more than
+once every 15 minutes, and is never bundled as a shared key. APRS.fi is credited
+on the weather page and in the settings page, with a link to its service. Before
+distributing builds with this integration, each user must configure their own
+key and the publisher should contact APRS.fi as required by its API terms.
+
+PSKReporter asks that reception data is retrieved no more often than once every five minutes. The firmware enforces that as a hard floor: the refresh setting will not go below five minutes, and a manual refresh from the touch screen or from saving settings is queued rather than run immediately if the last request was more recent than that. A `503` response, which is how PSKReporter turns away a client querying too often, is shown as `Rate limited` on the status line.
+
+Reports are read straight off the socket one XML element at a time and never buffered whole, so an active callsign returning hundreds of reports costs no more RAM than a quiet one. Up to 48 grid squares are plotted; the furthest-report line considers every report returned, not just the plotted ones.
+
+### ISS Tracker
+
+Plots the current position of the ISS on the same world map the Greyline and PSKReporter pages use, draws its ground track either side of now, and lists upcoming passes over your configured locator. Position and track are computed on-device with [SGP4](https://github.com/Hopperpop/Sgp4-Library) orbital propagation from a TLE fetched periodically from [Celestrak](https://celestrak.org/), so they update often (every 20 seconds) and cost no network requests beyond the daily TLE refresh. Passes still come from the free [N2YO](https://www.n2yo.com/api/) REST API's `radiopasses` endpoint, since correctly searching a topocentric elevation curve for AOS/max-elevation/LOS is exactly the kind of thing better left to a service that already does it, and N2YO's free-tier limit for that endpoint (100 requests/hour) comfortably covers an hourly refresh. `radiopasses` rather than `visualpasses` deliberately: hams care about any pass above the elevation threshold for an RF contact (APRS, voice repeater, SSTV), not just the rarer passes where the ISS is sunlit against a dark sky.
+
+Displays:
+
+- ISS marker on the world map, alongside the QTH marker
+- Ground track for roughly the 45 minutes either side of now (about half the ISS's ~93 minute orbit), as a thin line; a segment is skipped rather than drawn wherever the track crosses the antimeridian
+- Current latitude/longitude and altitude, in both km and miles
+- Current azimuth and elevation - i.e. where to actually point - alongside the next pass line
+- Next pass: rise time (UTC), maximum elevation, duration
+- Every pass after that which still fits the row: four on the 2.8" boards, up to five on the 4.0" (matching the DX/POTA pages' precedent of the taller board showing more rows rather than just bigger text)
+
+Settings:
+
+- `Show ISS tracker page`: off by default
+- `N2YO API key`: free, from [n2yo.com/api](https://www.n2yo.com/api/) — used only for the pass list; position and track work without it once the TLE has been fetched, but the page stays hidden until a key is set regardless
+
+This is the one dashboard page that is not always present. With the checkbox off, or the key blank, it is left out of both the automatic page cycle and manual left/right navigation entirely — the dashboard behaves exactly as it did before this page existed. Turning it on and setting a key adds it immediately, no reboot required.
+
+Passes are only searched up to two days out and down to a 10 degree minimum elevation, which is the same trade every ham pass predictor makes between screen space and usefulness.
+
+### DX Spots
+
+Supports three source modes:
+
+- `Auto` (default): backfill the list from JSON, then keep a Telnet connection open and add live spots on top of it
+- `JSON`: use only the configured JSON feed
+- `Telnet`: maintain a connection to the configured DX Cluster
+
+In `Auto`, JSON fills the list in one request so the page is useful within seconds of boot, and Telnet then delivers spots live, one at a time. Once Telnet is delivering it keeps the list and JSON is left alone; JSON refreshes again only while Telnet has yet to deliver, or if the connection drops or falls silent for 10 minutes. A Telnet connection that cannot reach the cluster does not disturb the JSON list on screen.
+
+The default JSON endpoint is:
+
+```text
+https://web.cluster.iz3mez.it/spots.json
+```
+
+Displays recent spots with:
+
+- Frequency
+- Callsign
+- Mode, inferred where possible
+- UTC time
+- Last update time and status
+
+The list holds eight spots on the 2.8" boards and twelve on the 4.0". A new
+Telnet spot pushes the rows down one pitch, animated by rendering the incoming
+row and the rows already on screen into a sprite and pushing a shifted window of
+it each frame.
+
+The default Telnet cluster is `dxspots.com:7300`. The configured station callsign is used for login, or `NOCALL` if no callsign is set. Both sources are configurable from the web settings page.
+
+The device keeps the last good spot list when a refresh or connection fails. The DX page shows whether the active data came from JSON, Telnet, or the last good result.
+
+## Configuration Files
+
+### `include/app_config.local.h`
+
+Optional per-device defaults. Copy from `include/app_config.example.h`; this
+file is ignored by Git so credentials and private service URLs stay local.
+
+Useful defaults:
+
+```cpp
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
+#define MAIDENHEAD_LOCATOR "AA00"
+#define APP_SETTINGS_NAMESPACE "cyd-hamclock"
+#define TIMEZONE_DEFAULT "UTC0"
+#define TIMEZONE_LABEL_DEFAULT "UTC"
+#define CALLSIGN_DEFAULT ""
+#define OPENWEBRX_URL_DEFAULT ""
+#define DMR_HOTSPOT_URL_DEFAULT ""
+#define N2YO_API_KEY_DEFAULT ""
+#define PROPAGATION_JSON_URL ""
+#define DX_SPOTS_URL ""
+```
+
+`include/app_config.h` supplies safe generic fallbacks. Values saved through the captive portal or web settings page override most defaults at runtime.
+When no DX URL has been saved, `DX_SPOTS_URL` is used if configured; otherwise the public IZ3MEZ endpoint is used.
+
+### `include/User_Setup*.h`
+
+TFT_eSPI display configuration. There is one per board, and PlatformIO
+force-includes the right one from that environment's `build_flags`:
+
+```ini
+build_flags =
+  -D USER_SETUP_LOADED=1
+  -include include/User_Setup.h          ; or _ST7789.h / _ST7796.h
+```
+
+Because the header is force-included into every translation unit, the
+`DISPLAY_W` and `DISPLAY_H` it defines are visible project-wide. The page
+layouts derive their geometry from those two values, and `src/dx_spots.h` and
+`src/pota_spots.h` use `DISPLAY_H` to size the spot arrays — eight rows on the
+2.8" boards, twelve on the 4.0".
+
+## Timezones
+
+The web settings page includes common timezone presets. The firmware uses POSIX timezone strings.
+
+UK default:
+
+```text
+GMT0BST-1,M3.5.0/1,M10.5.0/2
+```
+
+UTC:
+
+```text
+UTC0
+```
+
+If your country is not listed, choose `Custom POSIX TZ` and enter a POSIX rule manually.
+
+### POTA Spots
+
+Live Parks on the Air activator spots from `https://api.pota.app/spot/activator`.
+
+Displays `Freq | Call | Mode | Park`, newest spot first. The park reference takes the column DX Spots uses for time, since the reference is what you need in order to log the contact.
+
+New spots scroll in one at a time using the same animation as the DX Spots page. Both pages share one set of row state and one scroll sprite, since only one of them can be on screen at a time; they differ only in the header of the last column.
+
+Settings:
+
+- `Max distance km`: great-circle distance from your Maidenhead locator. `0` (the default) shows everything.
+- `POTA refresh minutes`: 1 to 120, default 5.
+- `Hide RBN spots`: RBN entries are posted automatically by skimmers rather than by a person.
+
+The status line reports how many spots were shown out of how many the feed returned, plus how many the filters rejected, so a short list explains itself.
+
+Notes and limits:
+
+- POTA publishes no formal rate limit. Existing client libraries settle on one request a minute, so that is enforced as a hard floor regardless of the refresh setting.
+- The feed returns roughly a hundred spots in no guaranteed order. They are read one JSON object at a time and never buffered as a whole array, and the newest eight that pass the filters are kept.
+- Repeat spots of the same activator at the same park are collapsed into one row, so a heavily spotted station cannot crowd out everyone else.
+- Spots without coordinates are always shown, even when a distance limit is set, since there is no way to tell whether they are near or far.
+- SOTA is deliberately not included. The `api2.sota.org.uk` endpoint currently returns a notice that it is deprecated and due for removal, so it is left until the replacement API is settled.
+
+## Data Refresh
+
+Default refresh intervals:
+
+- HF Propagation: 15 minutes
+- DX JSON: 5 minutes
+- DX Telnet: persistent connection with reconnect attempts limited to once every 30 seconds
+- PSKReporter: 5 minutes, which is also the lowest interval the service permits
+- POTA: 5 minutes, with a one minute hard floor
+- ISS Tracker: position/track every 20 seconds (local SGP4 computation, no network cost), TLE once a day, passes every hour (all fixed, not user-configurable)
+- Greyline calculations: once per minute
+- Clock: once per second
+
+Propagation, DX, and PSKReporter refresh intervals can be changed in the web settings page.
+
+## Project Structure
+
+```text
+include/
+  User_Setup.h              TFT_eSPI pin setup, 2.8" ILI9341
+  User_Setup_ST7789.h       TFT_eSPI pin setup, 2.8" ST7789
+  User_Setup_ST7796.h       TFT_eSPI pin setup, 4.0" ST7796S
+  app_config.example.h      Example local config
+  greyline_map.h            Embedded Greyline map bitmap, 300x150
+  greyline_map_460x230.h    Embedded Greyline map bitmap, 4.0" board
+
+src/
+  main.cpp              App entry point
+  connectivity.*        Wi-Fi, NTP, timezone handling
+  settings.*            Preferences-backed settings
+  setup_portal.*        Captive portal and LAN web settings
+  dashboard_display.*   TFT UI, touch, page rendering
+  propagation.*         HamQSL fetch and parsing
+  greyline.*            Solar and greyline calculations
+  psk_reporter.*        PSKReporter query, streaming XML parse, rate limiting
+  pota_spots.*          POTA spot fetch, streaming JSON parse, distance filter
+  dx_spots.*            DX JSON fetch plus Telnet connection and parsing
+  iss_tracker.*         SGP4 position/track from a fetched TLE, plus N2YO pass fetch
+```
+
+## Notes And Limits
+
+- The setup AP remains available while the device runs.
+- The web UI is for trusted LAN use only.
+- Telnet reading is non-blocking; connection attempts use a short bounded timeout.
+- SD card storage is not required.
+- LVGL is not used.
+- The embedded Greyline map uses flash space; current firmware size is close to the default app partition limit. All three environments use `min_spiffs.csv` to get a large enough app partition. The 4.0" build is the biggest, as it carries a 460x230 map instead of 300x150.
+- The Greyline and PSKReporter maps are composed and pushed one horizontal band at a time rather than as a single sprite, so the map visibly draws in stages. That is deliberate: the 4.0" map would need a 211,600-byte contiguous allocation against a largest free block of about 110,000, so it could not be drawn any other way. Band height is set per board by `MAP_BAND_ROWS` and must divide the map height exactly.
+
+## Troubleshooting
+
+### Display is blank or white
+
+Check that your CYD uses the same display pins as the setup header for the
+environment you built, and that you flashed the environment matching your panel.
+
+### Display shows random coloured pixels
+
+The panel is receiving SPI it cannot follow. Before reaching for a lower
+`SPI_FREQUENCY`, check which SPI port the build is using. On a board wired to
+GPIO 12/13/14/15 — the ESP32's native HSPI pins — TFT_eSPI's default VSPI has to
+route those signals through the GPIO matrix, and the added delay makes anything
+near 40MHz unreliable. Setting `USE_HSPI_PORT` in the setup header moves them
+onto IOMUX and the same panel runs at 80MHz.
+
+This is worth checking first because lowering the clock hides the fault at a
+real cost: it is roughly a third of the draw rate, which shows up as a visibly
+slow spot-list scroll and a slow map redraw.
+
+### Touch is inaccurate
+
+The touch calibration constants are in `src/dashboard_display.cpp`. CYD touch panels vary slightly.
+
+### Time does not sync
+
+Check Wi-Fi status and confirm your network allows NTP. The footer shows `NTP OK` when synced.
+
+### Web page does not open
+
+Check the IP shown on the clock page and browse to:
+
+```text
+http://that-ip/
+```
+
+If `cyd-ham.local` does not resolve, use the IP address instead.
+
+### Propagation or DX shows fetch failed
+
+Confirm Wi-Fi is connected and that your network allows HTTPS requests to the configured data source.
+
+## Credits
+
+- Original CYD Ham Dashboard: **HenrysCat** – <https://github.com/HenrysCat/esp32-cyd-ham-dashboard>
+- BricoHams edition: **BricoHams**, with thanks to **EA5JEF, Diego**
+- Libraries and data services: see [CREDITS.md](CREDITS.md)
+
+Released under the GNU General Public License v3.0, like the original project.
