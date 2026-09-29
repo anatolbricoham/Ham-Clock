@@ -1,6 +1,6 @@
 # CYD Ham Dashboard – BricoHams edition
 
-> **BricoHams edition** of the CYD Ham Dashboard, maintained by the BricoHams group with thanks to **EA5JEF, Diego**. It is based on the original project by [HenrysCat](https://github.com/HenrysCat/esp32-cyd-ham-dashboard) – many thanks for creating it. Documentation and the configuration manual are in [`docs/`](docs/README.md); full acknowledgements in [CREDITS.md](CREDITS.md).
+> **BricoHams edition** of the CYD Ham Dashboard, maintained by the BricoHams group with thanks to **EA5JEF, Diego** - **EA5KAO, Anatol**. It is based on the original project by [HenrysCat](https://github.com/HenrysCat/esp32-cyd-ham-dashboard) – many thanks for creating it. Documentation and the configuration manual are in [`docs/`](docs/README.md); full acknowledgements in [CREDITS.md](CREDITS.md).
 
 A HamClock-inspired ham radio dashboard for the ESP32 Cheap Yellow Display, supporting both the 2.8" ESP32-2432S028R and the 4.0" 320x480 ST7796S variant from a single source tree.
 
