@@ -12,14 +12,20 @@ namespace {
 Preferences preferences;
 AppSettings currentSettings;
 
-constexpr char kNamespace[] = "hamclock";
-constexpr char kDefaultTimezone[] = "GMT0BST-1,M3.5.0/1,M10.5.0/2";
-constexpr char kDefaultTimezoneLabel[] = "UK local";
+constexpr char kNamespace[] = APP_SETTINGS_NAMESPACE;
+constexpr char kDefaultTimezone[] = TIMEZONE_DEFAULT;
+constexpr char kLegacyDefaultTimezone[] = "CET-1CEST-2,M3.5.0/2,M10.5.0/3";
+constexpr char kDefaultTimezoneLabel[] = TIMEZONE_LABEL_DEFAULT;
 constexpr char kDefaultDxSpotsUrl[] = "https://web.cluster.iz3mez.it/spots.json";
+constexpr char kDefaultOpenWebRxUrl[] = OPENWEBRX_URL_DEFAULT;
+constexpr char kDefaultDmrHotspotUrl[] = DMR_HOTSPOT_URL_DEFAULT;
 constexpr char kDefaultDxTelnetHost[] = "dxspots.com";
 constexpr uint16_t kDefaultDxTelnetPort = 7300;
 constexpr uint16_t kDefaultPropagationRefreshMinutes = 15;
 constexpr uint16_t kDefaultDxRefreshMinutes = 5;
+constexpr uint16_t kDefaultDmrRefreshSeconds = 30;
+constexpr uint16_t kMinAprsRadiusKm = 10;
+constexpr uint16_t kMaxAprsRadiusKm = 300;
 // PSKReporter asks for no more than one query every five minutes, so that is
 // both the default and the lowest value the settings page will accept.
 constexpr uint16_t kMinPskRefreshMinutes = 5;
@@ -121,10 +127,13 @@ void normalizeSettings(AppSettings& settings) {
   settings.locator = limitedString(settings.locator, 6);
   settings.locator.toUpperCase();
   settings.propagationJsonUrl = limitedString(settings.propagationJsonUrl, 180);
+  settings.openWebRxUrl = limitedString(settings.openWebRxUrl, 180);
+  settings.dmrHotspotUrl = limitedString(settings.dmrHotspotUrl, 180);
   settings.dxSpotsUrl = limitedString(settings.dxSpotsUrl, 180);
   settings.dxTelnetHost = limitedString(settings.dxTelnetHost, 64);
   settings.pskAppContact = limitedString(settings.pskAppContact, 64);
   settings.n2yoApiKey = limitedString(settings.n2yoApiKey, 64);
+  settings.aprsFiApiKey = limitedString(settings.aprsFiApiKey, 64);
 
   if (settings.timezone.length() == 0) {
     settings.timezone = kDefaultTimezone;
@@ -151,6 +160,11 @@ void normalizeSettings(AppSettings& settings) {
   settings.propagationRefreshMinutes =
       constrain(settings.propagationRefreshMinutes, static_cast<uint16_t>(1),
                 static_cast<uint16_t>(120));
+  settings.dmrRefreshSeconds =
+      constrain(settings.dmrRefreshSeconds, static_cast<uint16_t>(15),
+                static_cast<uint16_t>(600));
+  settings.aprsRadiusKm = constrain(settings.aprsRadiusKm, kMinAprsRadiusKm,
+                                    kMaxAprsRadiusKm);
   settings.dxRefreshMinutes =
       constrain(settings.dxRefreshMinutes, static_cast<uint16_t>(1),
                 static_cast<uint16_t>(120));
@@ -207,13 +221,25 @@ void settingsBegin() {
   }
 
   currentSettings.timezone = readStringOrDefault("tz", kDefaultTimezone);
+  if (currentSettings.timezone == kLegacyDefaultTimezone) {
+    currentSettings.timezone = kDefaultTimezone;
+    preferences.putString("tz", kDefaultTimezone);
+  }
   currentSettings.timezoneLabel = readStringOrDefault("tzlabel", kDefaultTimezoneLabel);
   currentSettings.locator = readStringOrDefault("locator", MAIDENHEAD_LOCATOR);
-  currentSettings.callsign = preferences.getString("callsign", "");
+  currentSettings.callsign = preferences.getString("callsign", CALLSIGN_DEFAULT);
   currentSettings.clock12Hour = preferences.getBool("clock12", false);
   currentSettings.swapUtcLocal = preferences.getBool("swaputc", false);
   currentSettings.useJsonPropagationProxy = preferences.getBool("propjson", false);
   currentSettings.propagationJsonUrl = readStringOrDefault("propurl", PROPAGATION_JSON_URL);
+  currentSettings.openWebRxUrl = readStringOrDefault("owrxurl", kDefaultOpenWebRxUrl);
+  currentSettings.dmrHotspotUrl = readStringOrDefault("dmrhotspot", kDefaultDmrHotspotUrl);
+  currentSettings.dmrRefreshSeconds =
+      preferences.getUShort("dmrsecs", kDefaultDmrRefreshSeconds);
+    currentSettings.aprsRadiusKm =
+      preferences.getUShort("aprsradius", APRS_RADIUS_KM_DEFAULT);
+      currentSettings.aprsFiApiKey =
+        preferences.getString("aprsfikey", APRSFI_API_KEY_DEFAULT);
   currentSettings.dxSourceMode = static_cast<DxSourceMode>(
       preferences.getUChar("dxmode", static_cast<uint8_t>(kDxSourceAuto)));
   currentSettings.dxSpotsUrl = readStringOrDefault("dxurl", defaultDxSpotsUrl());
@@ -232,11 +258,11 @@ void settingsBegin() {
   currentSettings.potaMaxDistanceKm = preferences.getUShort("potadist", 0);
   currentSettings.potaExcludeRbn = preferences.getBool("potarbn", false);
   currentSettings.issEnabled = preferences.getBool("issenabled", false);
-  currentSettings.n2yoApiKey = preferences.getString("n2yokey", "");
+  currentSettings.n2yoApiKey = preferences.getString("n2yokey", N2YO_API_KEY_DEFAULT);
   currentSettings.autoPageChange = preferences.getBool("autopage", false);
   currentSettings.autoPageSeconds =
       preferences.getUShort("autosecs", kDefaultAutoPageSeconds);
-  currentSettings.autoPageMask = preferences.getUChar("autopages", kAutoPageMaskAll);
+  currentSettings.autoPageMask = preferences.getUShort("autopages", kAutoPageMaskAll);
   currentSettings.brightnessPercent =
       preferences.getUChar("bright", kDefaultBrightnessPercent);
   currentSettings.nightDimEnabled = preferences.getBool("nightdim", false);
@@ -276,6 +302,11 @@ void saveSettings(const AppSettings& settings) {
   preferences.putString("locator", currentSettings.locator);
   preferences.putBool("propjson", currentSettings.useJsonPropagationProxy);
   preferences.putString("propurl", currentSettings.propagationJsonUrl);
+  preferences.putString("owrxurl", currentSettings.openWebRxUrl);
+  preferences.putString("dmrhotspot", currentSettings.dmrHotspotUrl);
+  preferences.putUShort("dmrsecs", currentSettings.dmrRefreshSeconds);
+  preferences.putUShort("aprsradius", currentSettings.aprsRadiusKm);
+  preferences.putString("aprsfikey", currentSettings.aprsFiApiKey);
   preferences.putUChar("dxmode", static_cast<uint8_t>(currentSettings.dxSourceMode));
   preferences.putString("dxurl", currentSettings.dxSpotsUrl);
   preferences.putString("dxhost", currentSettings.dxTelnetHost);
@@ -293,7 +324,7 @@ void saveSettings(const AppSettings& settings) {
   preferences.putString("n2yokey", currentSettings.n2yoApiKey);
   preferences.putBool("autopage", currentSettings.autoPageChange);
   preferences.putUShort("autosecs", currentSettings.autoPageSeconds);
-  preferences.putUChar("autopages", currentSettings.autoPageMask);
+  preferences.putUShort("autopages", currentSettings.autoPageMask);
   preferences.putUChar("bright", currentSettings.brightnessPercent);
   preferences.putBool("nightdim", currentSettings.nightDimEnabled);
   preferences.putUChar("nightpct", currentSettings.nightBrightnessPercent);

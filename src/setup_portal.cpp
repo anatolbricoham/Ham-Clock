@@ -7,6 +7,7 @@
 
 #include "connectivity.h"
 #include "dashboard_display.h"
+#include "dmr_panel.h"
 #include "dx_spots.h"
 #include "greyline.h"
 #include "pota_spots.h"
@@ -256,7 +257,7 @@ String pageHtml(const String& message = "") {
   html += F("<option value='UTC'>UTC</option>");
   html += F("<option value='UK'>United Kingdom GMT/BST</option>");
   html += F("<option value='IE'>Ireland GMT/IST</option>");
-  html += F("<option value='EU_CENTRAL'>Central Europe CET/CEST</option>");
+  html += F("<option value='EU_CENTRAL'>Spain Peninsula/Balearic and Central Europe CET/CEST</option>");
   html += F("<option value='EU_EASTERN'>Eastern Europe EET/EEST</option>");
   html += F("<option value='US_EASTERN'>US Eastern</option>");
   html += F("<option value='US_CENTRAL'>US Central</option>");
@@ -318,7 +319,28 @@ String pageHtml(const String& message = "") {
   html += String(settings.propagationRefreshMinutes);
   html += F("'></div><div><label for='dxmins'>DX refresh minutes</label><input id='dxmins' name='dxmins' type='number' min='1' max='120' value='");
   html += String(settings.dxRefreshMinutes);
-  html += F("'></div></div></div><div class='card'><h2>PSKReporter</h2>");
+  html += F("'></div></div></div><div class='card'><h2>OpenWebRX</h2>");
+  html += F("<small>Reads receiver status from <code>/status.json</code> on this server.</small>");
+  html += F("<label for='owrxurl'>OpenWebRX base URL</label><input id='owrxurl' name='owrxurl' maxlength='180' value='");
+  html += htmlEscape(settings.openWebRxUrl);
+  html += F("'>");
+  html += F("</div><div class='card'><h2>DMR Last Heard (Live)</h2>");
+  html += F("<small>Reads recent DMR calls from <code>/api/last_heard.php</code>. Enter the hotspot base URL, without the API path.</small>");
+  html += F("<label for='dmrurl'>DMR hotspot base URL</label><input id='dmrurl' name='dmrurl' maxlength='180' value='");
+  html += htmlEscape(settings.dmrHotspotUrl);
+  html += F("'>");
+  html += F("<label for='dmrsecs'>DMR Last Heard refresh seconds</label><input id='dmrsecs' name='dmrsecs' type='number' min='15' max='600' value='");
+  html += String(settings.dmrRefreshSeconds);
+  html += F("'><small>Allowed interval: 15 to 600 seconds.</small>");
+  html += F("</div><div class='card'><h2>APRS Nearby</h2>");
+  html += F("<small>Uses a read-only APRS-IS radius filter centered on your locator. The Station callsign is used to identify the connection; no packets are transmitted.</small>");
+  html += F("<label for='aprsradius'>APRS nearby radius (km)</label><input id='aprsradius' name='aprsradius' type='number' min='10' max='300' value='");
+  html += String(settings.aprsRadiusKm);
+  html += F("'><small>Read-only APRS-IS filter centered on your Maidenhead locator. Allowed radius: 10 to 300 km.</small>");
+  html += F("<label for='aprsfikey'>APRS.fi API key</label><input id='aprsfikey' name='aprsfikey' type='password' maxlength='64' value='' autocomplete='new-password' placeholder='Leave blank to keep the saved key'>");
+  html += F("<label><input name='clearaprsfikey' type='checkbox' value='1'>Clear the saved APRS.fi key</label>");
+  html += F("<small>Used only to enrich the nearest station's weather data while the weather page is open. Get a personal key from <a href='https://aprs.fi/account/' target='_blank' rel='noopener'>aprs.fi</a>.</small>");
+  html += F("</div><div class='card'><h2>PSKReporter</h2>");
   html += F("<small>Plots reception reports for your callsign on the world map. Uses the callsign set above; leave it blank to switch this page off.</small>");
   html += F("<label for='pskdir'>Direction</label><select id='pskdir' name='pskdir'>");
   html += F("<option value='heard'");
@@ -430,7 +452,7 @@ String pageHtml(const String& message = "") {
   html += F("UTC:['UTC0','UTC'],");
   html += F("UK:['GMT0BST-1,M3.5.0/1,M10.5.0/2','UK local'],");
   html += F("IE:['IST-1GMT0,M10.5.0,M3.5.0/1','Ireland local'],");
-  html += F("EU_CENTRAL:['CET-1CEST-2,M3.5.0/2,M10.5.0/3','Central Europe'],");
+  html += F("EU_CENTRAL:['CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00','Spain Peninsula/Balearic'],");
   html += F("EU_EASTERN:['EET-2EEST-3,M3.5.0/3,M10.5.0/4','Eastern Europe'],");
   html += F("US_EASTERN:['EST5EDT,M3.2.0/2,M11.1.0/2','US Eastern'],");
   html += F("US_CENTRAL:['CST6CDT,M3.2.0/2,M11.1.0/2','US Central'],");
@@ -482,6 +504,18 @@ void handleSave() {
   settings.swapUtcLocal = server.hasArg("swaputc");
   settings.useJsonPropagationProxy = server.arg("propmode") == "json";
   settings.propagationJsonUrl = limitedArg("propurl", 180);
+  settings.openWebRxUrl = limitedArg("owrxurl", 180);
+  settings.dmrHotspotUrl = limitedArg("dmrurl", 180);
+  settings.dmrRefreshSeconds = static_cast<uint16_t>(
+      constrain(server.arg("dmrsecs").toInt(), 15L, 600L));
+    settings.aprsRadiusKm = static_cast<uint16_t>(
+      constrain(server.arg("aprsradius").toInt(), 10L, 300L));
+    const String aprsFiApiKey = limitedArg("aprsfikey", 64);
+    if (server.hasArg("clearaprsfikey")) {
+      settings.aprsFiApiKey = "";
+    } else if (aprsFiApiKey.length() > 0) {
+      settings.aprsFiApiKey = aprsFiApiKey;
+    }
   const String dxMode = server.arg("dxmode");
   settings.dxSourceMode = dxMode == "json" ? kDxSourceJson
                           : dxMode == "telnet" ? kDxSourceTelnet
@@ -511,10 +545,10 @@ void handleSave() {
   settings.autoPageChange = server.hasArg("autopage");
   settings.autoPageSeconds = static_cast<uint16_t>(
       constrain(server.arg("autosecs").toInt(), 3L, 600L));
-  uint8_t autoPageMask = 0;
+  uint16_t autoPageMask = 0;
   for (uint8_t i = 0; i < kDashboardPageCount; ++i) {
     if (server.hasArg(String("pg") + String(i))) {
-      autoPageMask |= static_cast<uint8_t>(1u << i);
+      autoPageMask |= static_cast<uint16_t>(1u << i);
     }
   }
   settings.autoPageMask = autoPageMask;
@@ -540,6 +574,7 @@ void handleSave() {
   requestGreylineRefresh();
   requestPskReporterRefresh();
   requestPotaSpotsRefresh();
+  requestDmrPanelRefresh();
 
   bool wifiChanged = false;
   for (uint8_t i = 0; i < kMaxWifiNetworks; ++i) {

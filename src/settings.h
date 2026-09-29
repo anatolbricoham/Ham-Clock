@@ -13,7 +13,7 @@ enum DxSourceMode : uint8_t {
 // Every dashboard page taking part in the automatic page change. One bit per
 // page, bit 0 being page 1; the static_assert in dashboard_display.cpp keeps
 // this in step with the number of pages the dashboard actually has.
-constexpr uint8_t kAutoPageMaskAll = 0xFF;
+constexpr uint16_t kAutoPageMaskAll = 0x3FFF;
 constexpr uint8_t kMaxWifiNetworks = 5;
 
 struct WifiNetwork {
@@ -34,6 +34,11 @@ struct AppSettings {
   bool swapUtcLocal;
   bool useJsonPropagationProxy;
   String propagationJsonUrl;
+  String openWebRxUrl;
+  String dmrHotspotUrl;
+  uint16_t dmrRefreshSeconds;
+  uint16_t aprsRadiusKm;
+  String aprsFiApiKey;
   DxSourceMode dxSourceMode;
   String dxSpotsUrl;
   String dxTelnetHost;
@@ -54,7 +59,7 @@ struct AppSettings {
   bool autoPageChange;
   uint16_t autoPageSeconds;
   // Pages included in the automatic rotation, as a kAutoPageMaskAll bitmask.
-  uint8_t autoPageMask;
+  uint16_t autoPageMask;
   uint8_t brightnessPercent;
   // Fades the backlight to nightBrightnessPercent across a window centred on
   // sunrise and sunset at the configured locator.

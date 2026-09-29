@@ -1,18 +1,22 @@
 #pragma once
 
-// Copy this file to include/app_config.h and enter your Wi-Fi credentials.
-// Keep app_config.h private if you later put this project under version control.
+// Copy to include/app_config.local.h for per-device overrides.
+// The local file is ignored by Git; keep credentials and API keys there.
 
-#define WIFI_SSID "your-wifi-ssid"
-#define WIFI_PASSWORD "your-wifi-password"
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
+#define MAIDENHEAD_LOCATOR "AA00"
+#define APP_SETTINGS_NAMESPACE "cyd-hamclock"
+#define TIMEZONE_DEFAULT "UTC0"
+#define TIMEZONE_LABEL_DEFAULT "UTC"
+#define CALLSIGN_DEFAULT ""
+#define OPENWEBRX_URL_DEFAULT ""
+#define DMR_HOTSPOT_URL_DEFAULT ""
+#define N2YO_API_KEY_DEFAULT ""
+#define APRS_RADIUS_KM_DEFAULT 100
+#define APRSFI_API_KEY_DEFAULT ""
 
-// Phase 1 fixed locator. Later phases can move this into settings/storage.
-#define MAIDENHEAD_LOCATOR "FF46"
-
-// Optional JSON proxy for propagation data. Leave empty to use HamQSL XML direct.
 #define PROPAGATION_JSON_URL ""
-
-// Optional JSON endpoint for DX spots. Leave empty to use the default IZ3MEZ feed.
 #define DX_SPOTS_URL ""
 
 // Optional display defaults for boards that always need the same orientation

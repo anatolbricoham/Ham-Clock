@@ -1,38 +1,58 @@
 #pragma once
 
-// Enter your Wi-Fi credentials here.
-// If this project is committed to git later, do not commit real credentials.
-
-#define WIFI_SSID "your-wifi-ssid"
-#define WIFI_PASSWORD "your-wifi-password"
-
-// Phase 1 fixed locator. Later phases can move this into settings/storage.
-#define MAIDENHEAD_LOCATOR "FF46"
-
-// Optional JSON proxy for propagation data. Leave empty to use HamQSL XML direct.
-#define PROPAGATION_JSON_URL ""
-
-// Optional JSON endpoint for DX spots. Leave empty to use the default IZ3MEZ feed.
-#define DX_SPOTS_URL ""
-
-// Display defaults for each board's wiring, applied on first boot or after a
-// factory reset. Once saved via the web settings page these are overridden by
-// the value stored on the device, so changing these later has no effect until
-// the next factory reset.
-//
-// The two panels need different values, and the driver macro from the
-// User_Setup header that platformio.ini force-includes says which board this
-// build targets, so the right set is picked automatically.
-#if defined(ST7796_DRIVER)
-// 4.0" 320x480 ST7796S, landscape with the USB socket on the left. Gives
-// MADCTL 0xE8 (MY | MX | MV | BGR), which is TFT_eSPI's own rotation 3 for this
-// controller. Confirmed on hardware 2026-08-17.
-#define ROTATE90_DEFAULT true
-#define FLIP180_DEFAULT true
-#define SWAP_RED_BLUE_DEFAULT true
-#else
-// 2.8" 240x320 ILI9341 (ESP32-2432S028R).
-#define ROTATE90_DEFAULT true
-#define MIRROR_DEFAULT true
-#define INVERT_COLOURS_DEFAULT true
+#if __has_include("app_config.local.h")
+#include "app_config.local.h"
 #endif
+
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD ""
+#endif
+#ifndef MAIDENHEAD_LOCATOR
+#define MAIDENHEAD_LOCATOR "AA00"
+#endif
+#ifndef PROPAGATION_JSON_URL
+#define PROPAGATION_JSON_URL ""
+#endif
+#ifndef DX_SPOTS_URL
+#define DX_SPOTS_URL ""
+#endif
+#ifndef APP_SETTINGS_NAMESPACE
+#define APP_SETTINGS_NAMESPACE "cyd-hamclock"
+#endif
+#ifndef TIMEZONE_DEFAULT
+#define TIMEZONE_DEFAULT "UTC0"
+#endif
+#ifndef TIMEZONE_LABEL_DEFAULT
+#define TIMEZONE_LABEL_DEFAULT "UTC"
+#endif
+#ifndef CALLSIGN_DEFAULT
+#define CALLSIGN_DEFAULT ""
+#endif
+#ifndef OPENWEBRX_URL_DEFAULT
+#define OPENWEBRX_URL_DEFAULT ""
+#endif
+#ifndef DMR_HOTSPOT_URL_DEFAULT
+#define DMR_HOTSPOT_URL_DEFAULT ""
+#endif
+#ifndef N2YO_API_KEY_DEFAULT
+#define N2YO_API_KEY_DEFAULT ""
+#endif
+#ifndef APRS_RADIUS_KM_DEFAULT
+#define APRS_RADIUS_KM_DEFAULT 100
+#endif
+#ifndef APRSFI_API_KEY_DEFAULT
+#define APRSFI_API_KEY_DEFAULT ""
+#endif
+
+// Uncomment display overrides here only when they should be shared by every
+// build from this checkout. Device-specific orientation belongs in the local
+// configuration file or web settings.
+// #define ROTATE90_DEFAULT true
+// #define SWAP_RED_BLUE_DEFAULT true
+// #define FLIP180_DEFAULT true
+// #define MIRROR_DEFAULT true
+// #define INVERT_COLOURS_DEFAULT true
+// #define SWAP_TOUCH_NAV_DEFAULT true

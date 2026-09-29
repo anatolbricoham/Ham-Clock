@@ -1,20 +1,21 @@
-# CYD Ham Dashboard
+# CYD Ham Dashboard – BricoHams edition
+
+> **BricoHams edition** of the CYD Ham Dashboard, maintained by the BricoHams group with thanks to **EA5JEF, Diego**. It is based on the original project by [HenrysCat](https://github.com/HenrysCat/esp32-cyd-ham-dashboard) – many thanks for creating it. Documentation and the configuration manual are in [`docs/`](docs/README.md); full acknowledgements in [CREDITS.md](CREDITS.md).
 
 A HamClock-inspired ham radio dashboard for the ESP32 Cheap Yellow Display, supporting both the 2.8" ESP32-2432S028R and the 4.0" 320x480 ST7796S variant from a single source tree.
 
-**[Flash it in your browser with the Web Flasher](https://henryscat.github.io/)**
+**[Flash it in your browser with the Web Flasher](https://anatolbricoham.github.io/Ham-Clock/)**
 
 It provides a touch-controlled landscape dashboard — 320x240 on the 2.8" board, 480x320 on the 4.0" — with UTC/local time, HamQSL propagation data, a greyline map, DX spots, Wi-Fi setup, and a local web settings page. The 4.0" board uses the extra room rather than simply scaling up: larger text on the data pages, and twelve DX/POTA spots in place of eight.
 
-<a href="https://www.buymeacoffee.com/Henrys_Cat" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+<a href="https://www.buymeacoffee.com/bricohams" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
-https://github.com/user-attachments/assets/772c46cd-7d77-45ed-b29a-c5d189fbcf8b
 
 ## Features
 
 - ESP32-2432S028R / CYD ILI9341 display support
 - XPT2046 touch navigation
-- Seven dashboard pages, plus an optional eighth:
+- Thirteen dashboard pages, plus an optional ISS tracker:
   - Clock
   - HF Propagation from HamQSL
   - VHF Conditions from HamQSL
@@ -23,6 +24,12 @@ https://github.com/user-attachments/assets/772c46cd-7d77-45ed-b29a-c5d189fbcf8b
   - ISS Tracker: current position and ground track on the same world map, plus upcoming passes (optional; hidden until a free N2YO API key is set)
   - DX spots from JSON and/or a persistent Telnet DX Cluster connection
   - POTA activator spots, with an optional distance filter from your locator
+  - OpenWebRX status and live chat
+  - DMR Last Heard from compatible hotspots
+  - World Clock with UTC and ten city clocks
+  - Nearest APRS weather station and recent weather data
+  - Nearby APRS nodes and stations, ordered by distance from your locator
+  - Live APRS map: range-ring view centred on your QTH with every station heard in the last hour (tap to zoom)
 - Captive portal Wi-Fi setup with up to five remembered networks; it automatically joins a saved network in range and switches off the hotspot a few seconds after connection (it can be switched back on from the web settings page if you need it again)
 - Local web settings page on the device IP
 - Hold the BOOT button on the back of the board for 5 seconds to factory reset all settings
@@ -123,6 +130,12 @@ If the release includes bootloader and partition binaries, use the release instr
 
 After flashing, the board will start its setup access point if Wi-Fi is not configured.
 
+### Publishing the Web Flasher
+
+The browser flasher lives in [`webflasher/`](webflasher/index.html) and uses [ESP Web Tools](https://esphome.github.io/esp-web-tools/). `tools/build_webflasher.py --build` builds every board variant and stages the bootloader, partition table, `boot_app0` and application image with a `manifest.json` per board in `webflasher/firmware/`. The script refuses to run while `include/app_config.local.h` exists, because that file would compile your Wi-Fi password and API keys into the public images.
+
+The `Web Flasher` GitHub Actions workflow runs the script and deploys `webflasher/` to GitHub Pages whenever a `v*` tag is pushed, or when it is started by hand. Enable Pages with the source set to **GitHub Actions** in the repository settings first.
+
 ## Building From Source
 
 Install:
@@ -133,19 +146,19 @@ Install:
 
 Clone the repository and open it in VS Code.
 
-Copy the example config:
+Copy the example config to a git-ignored local override file:
 
 ```sh
-copy include\app_config.example.h include\app_config.h
+copy include\app_config.example.h include\app_config.local.h
 ```
 
 On macOS/Linux:
 
 ```sh
-cp include/app_config.example.h include/app_config.h
+cp include/app_config.example.h include/app_config.local.h
 ```
 
-You may optionally edit `include/app_config.h` before flashing, but Wi-Fi and dashboard settings can also be configured from the captive portal or local web page.
+Set per-device Wi-Fi, locator, callsign, timezone, service URLs, and API keys in `include/app_config.local.h`. That file is ignored by Git. Alternatively, configure Wi-Fi and dashboard settings from the captive portal or local web page.
 
 Build. With no environment given this builds **all three**, which is a useful
 check that a change suits every board but is not what you want before a flash:
@@ -333,6 +346,29 @@ Settings:
 
 The page needs a callsign to work. With the callsign field blank it shows the map and a prompt to set one, and makes no requests.
 
+### APRS Weather and Nearby Stations
+
+Both pages use a receive-only TCP connection to APRS-IS with the standard
+`pass -1` login and a server-side radius filter centered on the configured
+Maidenhead locator. The Station callsign is used to identify the client; the
+dashboard never transmits or gates packets. The connection starts the first
+time an APRS page is opened and remains active in the background while Wi-Fi is
+connected, so weather beacons can arrive between carousel visits.
+
+`APRS nearby radius` in web settings accepts 10 to 300 km (default 100 km).
+The weather page selects the closest weather-bearing position packet and shows
+available APRS weather fields in metric units. The nearby page lists up to six
+stations, sorted by distance; comments containing common digipeater, LoRa, DMR,
+or repeater identifiers are labelled as nodes. Data availability depends on
+stations transmitting within range and APRS-IS connectivity.
+
+An optional personal APRS.fi API key can enrich the nearest station's weather
+data. The key is requested only while the weather page is active, no more than
+once every 15 minutes, and is never bundled as a shared key. APRS.fi is credited
+on the weather page and in the settings page, with a link to its service. Before
+distributing builds with this integration, each user must configure their own
+key and the publisher should contact APRS.fi as required by its API terms.
+
 PSKReporter asks that reception data is retrieved no more often than once every five minutes. The firmware enforces that as a hard floor: the refresh setting will not go below five minutes, and a manual refresh from the touch screen or from saving settings is queued rather than run immediately if the last request was more recent than that. A `503` response, which is how PSKReporter turns away a client querying too often, is shown as `Rate limited` on the status line.
 
 Reports are read straight off the socket one XML element at a time and never buffered whole, so an active callsign returning hundreds of reports costs no more RAM than a quiet one. Up to 48 grid squares are plotted; the furthest-report line considers every report returned, not just the plotted ones.
@@ -394,21 +430,29 @@ The device keeps the last good spot list when a refresh or connection fails. The
 
 ## Configuration Files
 
-### `include/app_config.h`
+### `include/app_config.local.h`
 
-Local default settings. Copy from `include/app_config.example.h`.
+Optional per-device defaults. Copy from `include/app_config.example.h`; this
+file is ignored by Git so credentials and private service URLs stay local.
 
 Useful defaults:
 
 ```cpp
-#define WIFI_SSID "your-wifi-ssid"
-#define WIFI_PASSWORD "your-wifi-password"
-#define MAIDENHEAD_LOCATOR "FF46"
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
+#define MAIDENHEAD_LOCATOR "AA00"
+#define APP_SETTINGS_NAMESPACE "cyd-hamclock"
+#define TIMEZONE_DEFAULT "UTC0"
+#define TIMEZONE_LABEL_DEFAULT "UTC"
+#define CALLSIGN_DEFAULT ""
+#define OPENWEBRX_URL_DEFAULT ""
+#define DMR_HOTSPOT_URL_DEFAULT ""
+#define N2YO_API_KEY_DEFAULT ""
 #define PROPAGATION_JSON_URL ""
 #define DX_SPOTS_URL ""
 ```
 
-Values saved through the captive portal or web settings page override most defaults at runtime.
+`include/app_config.h` supplies safe generic fallbacks. Values saved through the captive portal or web settings page override most defaults at runtime.
 When no DX URL has been saved, `DX_SPOTS_URL` is used if configured; otherwise the public IZ3MEZ endpoint is used.
 
 ### `include/User_Setup*.h`
@@ -561,3 +605,12 @@ If `cyd-ham.local` does not resolve, use the IP address instead.
 ### Propagation or DX shows fetch failed
 
 Confirm Wi-Fi is connected and that your network allows HTTPS requests to the configured data source.
+
+## Credits
+
+- Original CYD Ham Dashboard: **HenrysCat** – <https://github.com/HenrysCat/esp32-cyd-ham-dashboard>
+- BricoHams edition: **BricoHams**, with thanks to **EA5JEF, Diego**
+**BricoHams**, with thanks to **EA5KAO, Anatol**
+- Libraries and data services: see [CREDITS.md](CREDITS.md)
+
+Released under the GNU General Public License v3.0, like the original project.

@@ -11,6 +11,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "dmr_panel.h"
+#include "aprs_nearby.h"
 #include "dx_spots.h"
 #include "greyline.h"
 #include "iss_tracker.h"
@@ -55,8 +57,35 @@ enum DashboardPage : uint8_t {
   kPageIss,
   kPageDx,
   kPagePota,
+  kPageOpenWebRx,
+  kPageDmr,
+  kPageWorldClock,
+  kPageAprsWeather,
+  kPageAprsStations,
+  kPageAprsMap,
   kPageCount
 };
+
+struct WorldClockCity {
+  const char* name;
+  const char* timezone;
+};
+
+constexpr WorldClockCity kWorldClockCities[] = {
+    {"ANCHORAGE", "AKST9AKDT,M3.2.0,M11.1.0"},
+    {"LOS ANGELES", "PST8PDT,M3.2.0,M11.1.0"},
+    {"MEXICO CITY", "CST6"},
+    {"NEW YORK", "EST5EDT,M3.2.0,M11.1.0"},
+    {"BUENOS AIRES", "ART3"},
+    {"LONDON", "GMT0BST-1,M3.5.0/1,M10.5.0/2"},
+    {"MADRID", "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00"},
+    {"NAIROBI", "EAT-3"},
+    {"TOKYO", "JST-9"},
+    {"SYDNEY", "AEST-10AEDT-11,M10.1.0/2,M4.1.0/3"},
+};
+constexpr uint8_t kWorldClockCityCount =
+    sizeof(kWorldClockCities) / sizeof(kWorldClockCities[0]);
+constexpr uint8_t kWorldClockRows = kWorldClockCityCount / 2;
 
 static_assert(kPageCount == kDashboardPageCount,
               "kDashboardPageCount must match the number of dashboard pages");
@@ -511,6 +540,79 @@ String g_lastDate;
 String g_lastLocator;
 String g_lastIp;
 String g_lastUptime;
+String g_worldClockUtc;
+String g_worldClockCityTimes[kWorldClockCityCount];
+String g_lastWorldClockUtc;
+String g_lastWorldClockCityTimes[kWorldClockCityCount];
+time_t g_worldClockLastSecond = static_cast<time_t>(-1);
+time_t g_worldClockLastMinute = static_cast<time_t>(-1);
+String g_lastDmrStatus;
+String g_lastDmrCallsign;
+String g_lastDmrCountry;
+String g_lastDmrCallTime;
+String g_lastDmrSource;
+String g_lastDmrMode;
+String g_lastDmrTarget;
+String g_lastDmrDuration;
+String g_lastDmrLoss;
+String g_lastOpenWebRxStatus;
+String g_lastOpenWebRxReceiver;
+String g_lastOpenWebRxLocation;
+String g_lastOpenWebRxCapacity;
+String g_lastOpenWebRxChatStatus;
+String g_lastOpenWebRxChat[kMaxOpenWebRxChatMessages];
+String g_lastAprsWeatherStatus;
+String g_lastAprsWeatherCallsign;
+String g_lastAprsWeatherDistance;
+String g_lastAprsWeatherTemperature;
+String g_lastAprsWeatherHumidity;
+String g_lastAprsWeatherPressure;
+String g_lastAprsWeatherWind;
+String g_lastAprsWeatherGust;
+String g_lastAprsWeatherRain;
+String g_lastAprsStationStatus;
+String g_lastAprsStations[kMaxNearbyAprsStations];
+
+// APRS map page. The plot is a range-ring "radar" view centred on the QTH,
+// in a square to the left of a list of the stations it shows. Everything is
+// derived from DISPLAY_W/H so the same code lays out on 320x240 and 480x320.
+constexpr int16_t kAprsMapTop = 26;
+constexpr int16_t kAprsMapSize = kFooterTop - 4 - kAprsMapTop;
+constexpr int16_t kAprsMapX = 4;
+constexpr int16_t kAprsMapCx = kAprsMapX + kAprsMapSize / 2;
+constexpr int16_t kAprsMapCy = kAprsMapTop + kAprsMapSize / 2;
+constexpr int16_t kAprsMapRadiusPx = kAprsMapSize / 2 - 3;
+constexpr int16_t kAprsListX = kAprsMapX + kAprsMapSize + 8;
+constexpr int16_t kAprsListRight = DISPLAY_W - 4;
+constexpr int16_t kAprsListW = kAprsListRight - kAprsListX;
+constexpr uint8_t kAprsListFont = (DISPLAY_W >= 480) ? 2 : 1;
+constexpr int16_t kAprsListPitch = (DISPLAY_W >= 480) ? 20 : 12;
+constexpr int16_t kAprsListTop = kAprsMapTop + ((DISPLAY_W >= 480) ? 22 : 14);
+// Leaves one row at the bottom of the column for the colour legend.
+constexpr uint8_t kAprsListRows = static_cast<uint8_t>(
+    (kFooterTop - 4 - kAprsListTop) / kAprsListPitch - 1);
+constexpr uint8_t kAprsListMaxRows = 16;
+static_assert(kAprsListRows <= kAprsListMaxRows, "APRS list row cache too small");
+// Redraw the plot at most this often while packets are streaming in, so a
+// busy frequency does not keep the square flickering.
+constexpr uint32_t kAprsMapMinRedrawMs = 2000;
+// Older than this and a station is drawn grey rather than in its type colour.
+constexpr uint32_t kAprsMapStaleMs = 30UL * 60UL * 1000UL;
+constexpr uint16_t kAprsColorWeather = TFT_CYAN;
+constexpr uint16_t kAprsColorNode = TFT_YELLOW;
+constexpr uint16_t kAprsColorStation = TFT_GREEN;
+
+// 0 shows the full configured radius, 1 half of it, 2 a quarter. Cycled by a
+// centre tap on the map page.
+uint8_t g_aprsMapZoom = 0;
+uint32_t g_aprsMapDrawnRevision = 0;
+uint8_t g_aprsMapDrawnZoom = 0xFF;
+uint16_t g_aprsMapDrawnRadius = 0;
+uint32_t g_aprsMapLastDrawMs = 0;
+String g_lastAprsMapStatus;
+String g_lastAprsMapSummary;
+String g_lastAprsMapCalls[kAprsListMaxRows];
+String g_lastAprsMapInfo[kAprsListMaxRows];
 String g_lastPropSfiXray;
 String g_lastPropAK;
 String g_lastPropSunspots;
@@ -657,6 +759,47 @@ void clearPageState() {
   g_lastLocator = "";
   g_lastIp = "";
   g_lastUptime = "";
+  g_lastWorldClockUtc = "";
+  for (uint8_t i = 0; i < kWorldClockCityCount; ++i) {
+    g_lastWorldClockCityTimes[i] = "";
+  }
+  g_lastDmrStatus = "";
+  g_lastDmrCallsign = "";
+  g_lastDmrCountry = "";
+  g_lastDmrCallTime = "";
+  g_lastDmrSource = "";
+  g_lastDmrMode = "";
+  g_lastDmrTarget = "";
+  g_lastDmrDuration = "";
+  g_lastDmrLoss = "";
+  g_lastOpenWebRxStatus = "";
+  g_lastOpenWebRxReceiver = "";
+  g_lastOpenWebRxLocation = "";
+  g_lastOpenWebRxCapacity = "";
+  g_lastOpenWebRxChatStatus = "";
+  for (uint8_t i = 0; i < kMaxOpenWebRxChatMessages; ++i) {
+    g_lastOpenWebRxChat[i] = "";
+  }
+  g_lastAprsWeatherStatus = "";
+  g_lastAprsWeatherCallsign = "";
+  g_lastAprsWeatherDistance = "";
+  g_lastAprsWeatherTemperature = "";
+  g_lastAprsWeatherHumidity = "";
+  g_lastAprsWeatherPressure = "";
+  g_lastAprsWeatherWind = "";
+  g_lastAprsWeatherGust = "";
+  g_lastAprsWeatherRain = "";
+  g_lastAprsStationStatus = "";
+  for (uint8_t i = 0; i < kMaxNearbyAprsStations; ++i) {
+    g_lastAprsStations[i] = "";
+  }
+  g_lastAprsMapStatus = "";
+  g_lastAprsMapSummary = "";
+  for (uint8_t i = 0; i < kAprsListMaxRows; ++i) {
+    g_lastAprsMapCalls[i] = "";
+    g_lastAprsMapInfo[i] = "";
+  }
+  g_aprsMapDrawnZoom = 0xFF;
   g_lastPropSfiXray = "";
   g_lastPropAK = "";
   g_lastPropSunspots = "";
@@ -2073,6 +2216,80 @@ void drawClockPage(const ClockSnapshot& snapshot) {
   drawFooter(snapshot);
 }
 
+void updateWorldClockTimes(const ClockSnapshot& snapshot) {
+  if (!snapshot.timeValid) {
+    g_worldClockUtc = "Waiting for NTP";
+    for (uint8_t i = 0; i < kWorldClockCityCount; ++i) {
+      g_worldClockCityTimes[i] = "--:--";
+    }
+    g_worldClockLastSecond = static_cast<time_t>(-1);
+    g_worldClockLastMinute = static_cast<time_t>(-1);
+    return;
+  }
+
+  if (snapshot.epoch != g_worldClockLastSecond) {
+    tm utc;
+    char buffer[32];
+    gmtime_r(&snapshot.epoch, &utc);
+    strftime(buffer, sizeof(buffer), "%H:%M:%S %d/%m/%Y", &utc);
+    g_worldClockUtc = buffer;
+    g_worldClockLastSecond = snapshot.epoch;
+  }
+
+  const time_t currentMinute = snapshot.epoch / 60;
+  if (currentMinute == g_worldClockLastMinute) return;
+
+  const String restoreTimezone = getSettings().timezone;
+  for (uint8_t i = 0; i < kWorldClockCityCount; ++i) {
+    setenv("TZ", kWorldClockCities[i].timezone, 1);
+    tzset();
+    tm cityTime;
+    char buffer[8];
+    if (localtime_r(&snapshot.epoch, &cityTime)) {
+      strftime(buffer, sizeof(buffer), "%H:%M", &cityTime);
+      g_worldClockCityTimes[i] = buffer;
+    } else {
+      g_worldClockCityTimes[i] = "--:--";
+    }
+  }
+  setenv("TZ", restoreTimezone.c_str(), 1);
+  tzset();
+  g_worldClockLastMinute = currentMinute;
+}
+
+void drawWorldClockPage(const ClockSnapshot& snapshot) {
+  updateWorldClockTimes(snapshot);
+
+  if (g_pageDirty) {
+    tft.fillScreen(kBg);
+    drawCentered("WORLD CLOCK", 4, 2, kAccent);
+    tft.drawFastHLine(8, 24, tft.width() - 16, kPanel);
+    tft.drawFastHLine(8, 47, tft.width() - 16, kPanel);
+    for (uint8_t i = 0; i < kWorldClockCityCount; ++i) {
+      const uint8_t column = i / kWorldClockRows;
+      const uint8_t row = i % kWorldClockRows;
+      const int16_t x = column == 0 ? 12 : 164;
+      const int16_t y = 54 + row * 31;
+      drawLeft(kWorldClockCities[i].name, x, y + 3, 1, kMuted);
+      tft.drawFastHLine(x, y + 24, 144, kPanel);
+    }
+  }
+
+  drawCenteredField(g_lastWorldClockUtc, "UTC " + g_worldClockUtc, 28, 1, kMuted);
+  for (uint8_t i = 0; i < kWorldClockCityCount; ++i) {
+    if (g_lastWorldClockCityTimes[i] == g_worldClockCityTimes[i]) continue;
+    const uint8_t column = i / kWorldClockRows;
+    const uint8_t row = i % kWorldClockRows;
+    const int16_t x = column == 0 ? 12 : 164;
+    const int16_t y = 54 + row * 31;
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(kText, kBg);
+    tft.drawString(g_worldClockCityTimes[i], x + 144, y, 2);
+    g_lastWorldClockCityTimes[i] = g_worldClockCityTimes[i];
+  }
+  drawFooter(snapshot);
+}
+
 void drawPropagationPage(const ClockSnapshot& snapshot) {
   const PropagationData& propagation = getPropagationData();
 
@@ -2365,6 +2582,398 @@ void drawPotaPage(const ClockSnapshot& snapshot) {
   drawFooter(snapshot);
 }
 
+void drawOpenWebRxPage(const ClockSnapshot& snapshot) {
+  const DmrPanelData& panel = getDmrPanelData();
+
+  if (g_pageDirty) {
+    tft.fillScreen(kBg);
+    drawCentered("OpenWebRX", 4, 2, kAccent);
+    tft.drawFastHLine(8, 23, tft.width() - 16, kPanel);
+    tft.drawFastHLine(8, 109, tft.width() - 16, kPanel);
+  }
+
+  drawCenteredField(g_lastOpenWebRxStatus, "Server: " + panel.openWebRxStatus,
+                    27, 2, panel.openWebRxOnline ? kAccent : kWarn);
+  drawLeftField(g_lastOpenWebRxReceiver, "Receiver: " + panel.openWebRxName,
+                12, 53, 1, kText, tft.width() - 24);
+  drawLeftField(g_lastOpenWebRxLocation,
+                "Location: " + (panel.openWebRxLocation.length() ? panel.openWebRxLocation : "--"),
+                12, 69, 1, kMuted, tft.width() - 24);
+  const String capacity = panel.openWebRxVersion + "  Clients " +
+      String(panel.openWebRxActiveClients) + "/" + String(panel.openWebRxMaxClients) +
+      "  SDRs " + String(panel.openWebRxSdrCount);
+  drawLeftField(g_lastOpenWebRxCapacity, capacity, 12, 86, 1, kMuted,
+                tft.width() - 24);
+  drawLeftField(g_lastOpenWebRxChatStatus, "Chat: " + panel.openWebRxChatStatus,
+                12, 116, 1,
+                panel.openWebRxChatStatus == "Connected" ? kAccent : kMuted,
+                tft.width() - 24);
+  for (uint8_t i = 0; i < kMaxOpenWebRxChatMessages; ++i) {
+    String line;
+    if (i < panel.openWebRxChatCount) {
+      const OpenWebRxChatMessage& message = panel.openWebRxChat[i];
+      line = message.name.length() ? message.name + ": " + message.text : message.text;
+      if (line.length() > 48) line = line.substring(0, 47) + "~";
+    }
+    drawLeftField(g_lastOpenWebRxChat[i], line, 12, 137 + i * 17, 1, kText,
+                  tft.width() - 24);
+  }
+  drawFooter(snapshot);
+}
+
+void drawDmrDetail(String& last, const String& label, const String& value,
+                   int16_t x, int16_t y, int16_t width) {
+  const String current = label + "\t" + value;
+  if (current == last) return;
+
+  tft.fillRect(x, y - 2, width, tft.fontHeight(2) + 4, kBg);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(kMuted, kBg);
+  tft.drawString(label + ":", x, y, 2);
+  const int16_t valueX = x + tft.textWidth(label + ": ", 2);
+  tft.setTextColor(kText, kBg);
+  tft.drawString(value, valueX, y, 2);
+  last = current;
+}
+
+void drawDmrPage(const ClockSnapshot& snapshot) {
+  const DmrPanelData& panel = getDmrPanelData();
+  const DmrCall* call = panel.callCount > 0 ? &panel.calls[0] : nullptr;
+
+  if (g_pageDirty) {
+    tft.fillScreen(kBg);
+    drawCentered("DMR HOTSPOT", 4, 2, kAccent);
+    tft.drawFastHLine(8, 23, tft.width() - 16, kPanel);
+    tft.drawFastHLine(8, 111, tft.width() - 16, kPanel);
+  }
+
+  drawCenteredField(g_lastDmrStatus, "Status: " + panel.hotspotStatus, 27, 2,
+                    call ? kAccent : kWarn);
+  drawCenteredField(g_lastDmrCallsign, call ? call->callsign : "No DMR traffic yet",
+                    43, 4, call ? kText : kMuted);
+  drawCenteredField(g_lastDmrCountry, call ? call->country : "", 76, 2, kMuted);
+  drawCenteredField(g_lastDmrCallTime,
+                    call && call->timeUtc.length() ? "Last heard: " + call->timeUtc : "",
+                    96, 1, kMuted);
+
+  const String source = call ? call->source : "--";
+  const String mode = call ? (call->slot == "TS1" ? "DMR Slot 1" :
+                              call->slot == "TS2" ? "DMR Slot 2" : "DMR") : "--";
+  String target = call ? call->target : "--";
+  if (call && target.length() && !target.startsWith("TG ")) target = "TG " + target;
+  const String duration = !call ? "--" : call->duration == "TX" ? "TX active" :
+                          call->duration.length() ? call->duration + " s" : "--";
+  const String loss = !call || !call->ber.length() ? "--" : call->ber;
+
+  drawDmrDetail(g_lastDmrSource, "Source", source, 12, 124, 140);
+  drawDmrDetail(g_lastDmrMode, "Mode", mode, 164, 124, 144);
+  drawDmrDetail(g_lastDmrTarget, "Target", target, 12, 151, tft.width() - 24);
+  drawDmrDetail(g_lastDmrDuration, "TX Duration", duration, 12, 178, 140);
+  drawDmrDetail(g_lastDmrLoss, call && call->packetLoss ? "Packet Loss" : "BER",
+                loss, 164, 178, 144);
+  drawFooter(snapshot);
+}
+
+void drawAprsWeatherPage(const ClockSnapshot& snapshot) {
+  const NearbyAprsData& aprs = getNearbyAprsData();
+  const NearbyAprsWeather& weather = aprs.weather;
+  const bool hasWeather = weather.callsign.length() > 0;
+
+  if (g_pageDirty) {
+    tft.fillScreen(kBg);
+    drawCentered("APRS WEATHER", 4, 2, kAccent);
+    tft.drawFastHLine(8, 23, tft.width() - 16, kPanel);
+  }
+
+  drawCenteredField(g_lastAprsWeatherStatus, "APRS-IS: " + aprs.status,
+                    27, 2, aprs.status == "Receiving (read only)" ? kAccent : kWarn);
+  drawCenteredField(g_lastAprsWeatherCallsign,
+                    hasWeather ? weather.callsign : "No nearby weather station",
+                    49, hasWeather ? 4 : 2, hasWeather ? kText : kMuted);
+
+  String age = "";
+  const time_t now = time(nullptr);
+  if (hasWeather && weather.receivedAt > 0 && now >= weather.receivedAt) {
+    age = "  " + String((now - weather.receivedAt) / 60) + " min old";
+  }
+      const String weatherSource = aprs.weatherApiStatus == "OK"
+        ? "APRS.fi" : aprs.weatherSource;
+      const String weatherApiStatus = aprs.weatherApiStatus == "Not configured"
+        ? "" : " " + aprs.weatherApiStatus;
+    const String distance = weatherSource + weatherApiStatus + " | " +
+      (hasWeather
+        ? String(weather.distanceKm) + " km from " + getConfiguredLocator() + age
+        : String("Search radius: ") + String(getSettings().aprsRadiusKm) + " km");
+  drawCenteredField(g_lastAprsWeatherDistance, distance, 82, 1, kMuted);
+
+  char value[24];
+  String temperature = "--";
+  if (hasWeather && weather.hasTemperature) {
+    snprintf(value, sizeof(value), "%.1f C", weather.temperatureC);
+    temperature = value;
+  }
+  drawCenteredField(g_lastAprsWeatherTemperature, temperature, 99, 4,
+                    hasWeather && weather.hasTemperature ? kAccent : kMuted);
+
+  const String humidity = hasWeather && weather.hasHumidity
+      ? String(weather.humidity) + "%" : "--";
+  String pressure = "--";
+  if (hasWeather && weather.hasPressure) {
+    snprintf(value, sizeof(value), "%.1f hPa", weather.pressureHpa);
+    pressure = value;
+  }
+  drawLeftField(g_lastAprsWeatherHumidity, "Humidity: " + humidity,
+                18, 143, 2, kText, 138);
+  drawLeftField(g_lastAprsWeatherPressure, "Pressure: " + pressure,
+                164, 143, 2, kText, 142);
+
+  String wind = "--";
+  if (hasWeather && weather.hasWind) {
+    wind = String(weather.windDirection) + " deg / " + String(weather.windKph, 1) + " km/h";
+  }
+  drawLeftField(g_lastAprsWeatherWind, "Wind: " + wind, 18, 169, 2, kText, 290);
+
+  const String gust = hasWeather && weather.hasGust
+      ? String(weather.gustKph, 1) + " km/h" : "--";
+  const String rain = hasWeather && weather.hasRain
+      ? String(weather.rain24hMm, 1) + " mm/24h" : "--";
+  drawLeftField(g_lastAprsWeatherGust, "Gust: " + gust, 18, 194, 1, kMuted, 138);
+  drawLeftField(g_lastAprsWeatherRain, "Rain: " + rain, 164, 194, 1, kMuted, 142);
+  drawFooter(snapshot);
+}
+
+void drawAprsStationsPage(const ClockSnapshot& snapshot) {
+  const NearbyAprsData& aprs = getNearbyAprsData();
+
+  if (g_pageDirty) {
+    tft.fillScreen(kBg);
+    drawCentered("NEARBY APRS STATIONS", 4, 2, kAccent);
+    tft.drawFastHLine(8, 23, tft.width() - 16, kPanel);
+  }
+
+  drawLeftField(g_lastAprsStationStatus,
+                "APRS-IS: " + aprs.status + "  Radius: " +
+                    String(getSettings().aprsRadiusKm) + " km",
+                12, 28, 1,
+                aprs.status == "Receiving (read only)" ? kAccent : kWarn,
+                tft.width() - 24);
+
+  for (uint8_t i = 0; i < kMaxNearbyAprsStations; ++i) {
+    String line;
+    if (i < aprs.stationCount) {
+      const NearbyAprsStation& station = aprs.stations[i];
+      line = station.node ? "NODE " : "STN  ";
+      line += station.callsign + "  " + String(station.distanceKm) + " km";
+      if (station.comment.length()) line += "  " + station.comment;
+      if (line.length() > 48) line = line.substring(0, 47) + "~";
+    } else if (aprs.stationCount == 0 && i == 0) {
+      line = "Waiting for position packets";
+    }
+    drawLeftField(g_lastAprsStations[i], line, 12, 54 + i * 24, 1,
+                  i < aprs.stationCount && aprs.stations[i].node ? kAccent :
+                      aprs.stationCount ? kText : kMuted,
+                  tft.width() - 24);
+    if (i < kMaxNearbyAprsStations - 1) {
+      tft.drawFastHLine(12, 73 + i * 24, tft.width() - 24, kPanel);
+    }
+  }
+  drawFooter(snapshot);
+}
+
+uint16_t aprsMapStationColor(const AprsMapStation& station, uint32_t nowMs) {
+  if (nowMs - station.heardMs >= kAprsMapStaleMs) return kMuted;
+  if (station.weather) return kAprsColorWeather;
+  if (station.node) return kAprsColorNode;
+  return kAprsColorStation;
+}
+
+const char* compassPoint(uint16_t bearing) {
+  static const char* const kPoints[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+  return kPoints[((bearing + 22) % 360) / 45];
+}
+
+#if DISPLAY_W >= 480
+String aprsAgeText(uint32_t ageMs) {
+  const uint32_t minutes = ageMs / 60000UL;
+  if (minutes == 0) return "now";
+  return String(minutes) + "m";
+}
+#endif
+
+// Local flat-earth projection around the QTH. At a few hundred kilometres the
+// error against a great-circle plot is well under a pixel.
+void aprsMapProject(double qthLat, double qthLon, float lat, float lon, float kmPerPx,
+                    int16_t& x, int16_t& y) {
+  const double dxKm = (lon - qthLon) * 111.320 * cos(qthLat * 0.017453292519943295);
+  const double dyKm = (lat - qthLat) * 110.574;
+  x = static_cast<int16_t>(lround(kAprsMapCx + dxKm / kmPerPx));
+  y = static_cast<int16_t>(lround(kAprsMapCy - dyKm / kmPerPx));
+}
+
+void drawAprsMapPlot(const NearbyAprsData& aprs, uint16_t shownRadiusKm) {
+  const int16_t left = kAprsMapX;
+  const int16_t top = kAprsMapTop;
+  tft.fillRect(left + 1, top + 1, kAprsMapSize - 2, kAprsMapSize - 2, kBg);
+  tft.drawRect(left, top, kAprsMapSize, kAprsMapSize, kPanel);
+
+  // Everything inside is clipped to the square, so a label near the edge is
+  // cut rather than spilling into the list column.
+  tft.setViewport(left + 1, top + 1, kAprsMapSize - 2, kAprsMapSize - 2, false);
+
+  tft.drawFastHLine(left + 1, kAprsMapCy, kAprsMapSize - 2, kPanel);
+  tft.drawFastVLine(kAprsMapCx, top + 1, kAprsMapSize - 2, kPanel);
+  // Ring distances sit just inside each ring, below the east axis, clear of
+  // the north marker at the top.
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(kMuted, kBg);
+  for (uint8_t ring = 1; ring <= 3; ++ring) {
+    const int16_t r = static_cast<int16_t>(kAprsMapRadiusPx * ring / 3);
+    tft.drawCircle(kAprsMapCx, kAprsMapCy, r, kPanel);
+    const uint16_t ringKm = static_cast<uint16_t>((shownRadiusKm * ring + 1) / 3);
+    tft.drawString(String(ringKm), kAprsMapCx + r - 2, kAprsMapCy + 3, 1);
+  }
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("N", kAprsMapCx + 4, top + 3, 1);
+
+  double qthLat = 0.0;
+  double qthLon = 0.0;
+  const bool haveQth = getConfiguredLatitude(qthLat) && getConfiguredLongitude(qthLon);
+  if (haveQth) {
+    const float kmPerPx = static_cast<float>(shownRadiusKm) / kAprsMapRadiusPx;
+    const uint32_t nowMs = millis();
+    // Oldest first, so the most recently heard stations end up on top.
+    uint8_t order[kMaxAprsMapStations];
+    for (uint8_t i = 0; i < aprs.mapStationCount; ++i) order[i] = i;
+    for (uint8_t i = 1; i < aprs.mapStationCount; ++i) {
+      const uint8_t value = order[i];
+      int8_t j = static_cast<int8_t>(i) - 1;
+      while (j >= 0 && aprs.mapStations[order[j]].heardMs > aprs.mapStations[value].heardMs) {
+        order[j + 1] = order[j];
+        --j;
+      }
+      order[j + 1] = value;
+    }
+
+    for (uint8_t n = 0; n < aprs.mapStationCount; ++n) {
+      const AprsMapStation& station = aprs.mapStations[order[n]];
+      if (station.distanceKm > shownRadiusKm) continue;
+      int16_t x;
+      int16_t y;
+      aprsMapProject(qthLat, qthLon, station.latitude, station.longitude, kmPerPx, x, y);
+      const uint16_t color = aprsMapStationColor(station, nowMs);
+      if (station.weather) {
+        tft.fillRect(x - 2, y - 2, 5, 5, color);
+      } else if (station.node) {
+        tft.fillTriangle(x, y - 3, x - 3, y + 2, x + 3, y + 2, color);
+      } else {
+        tft.fillCircle(x, y, 2, color);
+      }
+      const int16_t labelW = tft.textWidth(station.callsign, 1);
+      const bool labelLeft = x + 5 + labelW > left + kAprsMapSize - 2;
+      tft.setTextDatum(labelLeft ? MR_DATUM : ML_DATUM);
+      tft.setTextColor(color, kBg);
+      tft.drawString(station.callsign, labelLeft ? x - 5 : x + 5, y, 1);
+    }
+
+    // QTH on top of everything else.
+    tft.drawCircle(kAprsMapCx, kAprsMapCy, 4, kText);
+    tft.drawPixel(kAprsMapCx, kAprsMapCy, kText);
+  }
+
+  tft.resetViewport();
+}
+
+void drawAprsMapPage(const ClockSnapshot& snapshot) {
+  const NearbyAprsData& aprs = getNearbyAprsData();
+  const uint16_t radiusKm = getSettings().aprsRadiusKm;
+  const uint16_t shownRadiusKm = max<uint16_t>(1, radiusKm >> g_aprsMapZoom);
+  const uint32_t nowMs = millis();
+
+  if (g_pageDirty) {
+    tft.fillScreen(kBg);
+    drawLeft("APRS MAP", 6, 4, 2, kAccent);
+    tft.drawFastHLine(4, 22, tft.width() - 8, kPanel);
+    // Legend in the last row of the list column.
+    const int16_t legendY = kAprsListTop + kAprsListRows * kAprsListPitch + 2;
+    int16_t x = kAprsListX;
+    tft.fillRect(x, legendY + 1, 5, 5, kAprsColorWeather);
+    drawLeft("WX", x + 8, legendY, 1, kMuted);
+    x += 30;
+    tft.fillTriangle(x + 3, legendY, x, legendY + 6, x + 6, legendY + 6, kAprsColorNode);
+    drawLeft("NODE", x + 9, legendY, 1, kMuted);
+    x += 42;
+    tft.fillCircle(x + 3, legendY + 3, 2, kAprsColorStation);
+    drawLeft("STN", x + 9, legendY, 1, kMuted);
+  }
+
+  drawRightField(g_lastAprsMapStatus, "APRS-IS: " + aprs.status, tft.width() - 6, 6, 1,
+                 aprs.status == "Receiving (read only)" ? kAccent : kWarn,
+                 tft.width() - 110);
+
+  const bool plotDue = g_pageDirty || g_aprsMapDrawnZoom != g_aprsMapZoom ||
+                       g_aprsMapDrawnRadius != radiusKm ||
+                       (aprs.mapRevision != g_aprsMapDrawnRevision &&
+                        nowMs - g_aprsMapLastDrawMs >= kAprsMapMinRedrawMs) ||
+                       // Colours fade to grey with age even with no new packets.
+                       nowMs - g_aprsMapLastDrawMs >= 60000UL;
+  if (plotDue) {
+    drawAprsMapPlot(aprs, shownRadiusKm);
+    g_aprsMapDrawnRevision = aprs.mapRevision;
+    g_aprsMapDrawnZoom = g_aprsMapZoom;
+    g_aprsMapDrawnRadius = radiusKm;
+    g_aprsMapLastDrawMs = nowMs;
+  }
+
+  // Station list, nearest first, limited to what the plot is showing.
+  uint8_t order[kMaxAprsMapStations];
+  uint8_t shown = 0;
+  for (uint8_t i = 0; i < aprs.mapStationCount; ++i) {
+    if (aprs.mapStations[i].distanceKm <= shownRadiusKm) order[shown++] = i;
+  }
+  for (uint8_t i = 1; i < shown; ++i) {
+    const uint8_t value = order[i];
+    int8_t j = static_cast<int8_t>(i) - 1;
+    while (j >= 0 &&
+           aprs.mapStations[order[j]].distanceKm > aprs.mapStations[value].distanceKm) {
+      order[j + 1] = order[j];
+      --j;
+    }
+    order[j + 1] = value;
+  }
+
+  const String summary = String(shown) + " stn  r " + String(shownRadiusKm) + " km" +
+                         (g_aprsMapZoom ? String("  x") + String(1 << g_aprsMapZoom) : "");
+  drawLeftField(g_lastAprsMapSummary, summary, kAprsListX, kAprsMapTop, kAprsListFont, kMuted,
+                kAprsListW);
+
+  for (uint8_t row = 0; row < kAprsListRows; ++row) {
+    String call;
+    String info;
+    uint16_t color = kMuted;
+    if (row < shown) {
+      const AprsMapStation& station = aprs.mapStations[order[row]];
+      call = station.callsign;
+      info = String(station.distanceKm) + compassPoint(station.bearingDeg);
+#if DISPLAY_W >= 480
+      info += " " + aprsAgeText(nowMs - station.heardMs);
+#endif
+      color = aprsMapStationColor(station, nowMs);
+      // The colour is not part of the cached text, so fold it in: a station
+      // turning stale must still be repainted.
+      call += color == kMuted ? " " : "";
+    } else if (row == 0 && shown == 0) {
+      call = aprs.mapStationCount ? "None in range" : "Waiting...";
+    }
+    const int16_t y = kAprsListTop + row * kAprsListPitch;
+    const int16_t infoW = kAprsListW / 2;
+    drawLeftField(g_lastAprsMapCalls[row], call, kAprsListX, y, kAprsListFont, color,
+                  kAprsListW - infoW);
+    drawRightField(g_lastAprsMapInfo[row], info, kAprsListRight, y, kAprsListFont, color,
+                   infoW);
+  }
+  drawFooter(snapshot);
+}
+
 void drawCurrentPage(const ClockSnapshot& snapshot) {
   // Settings may have turned the ISS page off (or the API key emptied) while
   // it was on screen; bounce off it the same way an unmatched page would.
@@ -2406,6 +3015,24 @@ void drawCurrentPage(const ClockSnapshot& snapshot) {
     case kPagePota:
       drawPotaPage(snapshot);
       break;
+    case kPageOpenWebRx:
+      drawOpenWebRxPage(snapshot);
+      break;
+    case kPageDmr:
+      drawDmrPage(snapshot);
+      break;
+    case kPageWorldClock:
+      drawWorldClockPage(snapshot);
+      break;
+    case kPageAprsWeather:
+      drawAprsWeatherPage(snapshot);
+      break;
+    case kPageAprsStations:
+      drawAprsStationsPage(snapshot);
+      break;
+    case kPageAprsMap:
+      drawAprsMapPage(snapshot);
+      break;
     default:
       g_currentPage = kPageClock;
       drawClockPage(snapshot);
@@ -2440,7 +3067,7 @@ void previousPage() {
 // that was reached by hand. Stops short of a full lap so a mask holding only
 // the page already showing leaves the screen alone rather than repainting it
 // on every interval.
-void advanceToNextIncludedPage(uint8_t mask) {
+void advanceToNextIncludedPage(uint16_t mask) {
   for (uint8_t step = 1; step < kPageCount; ++step) {
     const uint8_t candidate =
         static_cast<uint8_t>((static_cast<uint8_t>(g_currentPage) + step) % kPageCount);
@@ -2649,6 +3276,10 @@ void handleTouch() {
     } else if (g_currentPage == kPageIss &&
                x >= tft.width() / 3 && x <= (tft.width() * 2) / 3) {
       requestIssTrackerRefresh();
+    } else if (g_currentPage == kPageAprsMap &&
+               x >= tft.width() / 3 && x <= (tft.width() * 2) / 3) {
+      // Full radius, half, quarter, then back round.
+      g_aprsMapZoom = (g_aprsMapZoom + 1) % 3;
     } else {
       const bool tappedLeft = x < tft.width() / 2;
       if (tappedLeft != getSettings().swapTouchNav) {
@@ -2673,6 +3304,7 @@ void displayBegin() {
   pskReporterBegin();
   potaSpotsBegin();
   issTrackerBegin();
+  aprsNearbyBegin();
 
   pinMode(kTouchCs, OUTPUT);
   digitalWrite(kTouchCs, HIGH);
@@ -2696,10 +3328,17 @@ void displayUpdate(const ClockSnapshot& snapshot) {
                            refreshPotaSpotsIfNeeded(snapshot.wifiConnected) |
                            refreshIssTrackerIfNeeded(snapshot.wifiConnected, snapshot.epoch,
                                                      snapshot.timeValid) |
+                           refreshDmrPanelIfNeeded(snapshot.wifiConnected) |
+                               serviceAprsNearby(snapshot.wifiConnected,
+                                 g_currentPage == kPageAprsWeather ||
+                                 g_currentPage == kPageAprsStations ||
+                                 g_currentPage == kPageAprsMap,
+                                 g_currentPage == kPageAprsWeather) |
                            updateGreylineData(snapshot.epoch, snapshot.timeValid);
   const uint32_t nowMs = millis();
   serviceNightDimming(snapshot.epoch);
   serviceAutoPageChange(nowMs);
+  serviceOpenWebRxChat(snapshot.wifiConnected, g_currentPage == kPageOpenWebRx);
   if (g_pageDirty || dataChanged || nowMs - g_lastRenderMs >= kRenderIntervalMs) {
     drawCurrentPage(snapshot);
     g_lastRenderMs = nowMs;
@@ -2715,6 +3354,8 @@ void displayUpdate(const ClockSnapshot& snapshot) {
 
 void applyDisplaySettings() {
   const AppSettings& settings = getSettings();
+
+  dmrPanelBegin();
 
   // TFT_eSPI's RGB/BGR order and orientation are normally fixed at compile
   // time. Write the ILI9341 MADCTL byte directly here so differently wired
@@ -2774,6 +3415,12 @@ const char* dashboardPageName(uint8_t pageIndex) {
     case kPageIss: return "ISS Tracker";
     case kPageDx: return "DX Spots";
     case kPagePota: return "POTA Spots";
+    case kPageOpenWebRx: return "OpenWebRX";
+    case kPageDmr: return "DMR";
+    case kPageWorldClock: return "World Clock";
+    case kPageAprsWeather: return "APRS Weather";
+    case kPageAprsStations: return "Nearby APRS";
+    case kPageAprsMap: return "APRS Map";
     default: return "";
   }
 }

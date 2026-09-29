@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CYD Ham Dashboard – Web Flasher</title>
+  <meta name="description" content="Flash the BricoHams edition of the CYD Ham Dashboard to an ESP32 Cheap Yellow Display from your browser.">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <style>
+    :root {
+      --bg: #f6f5f1;
+      --card: #ffffff;
+      --text: #1d1d1b;
+      --muted: #5f5e58;
+      --border: #dddbd3;
+      --accent: #c98a00;
+      --accent-text: #1d1d1b;
+      --selected: #fff6dc;
+      --warn: #8a3b12;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #151513;
+        --card: #1f1f1c;
+        --text: #eceae3;
+        --muted: #a3a197;
+        --border: #3a3934;
+        --accent: #f2c14e;
+        --accent-text: #151513;
+        --selected: #2d2818;
+        --warn: #f0a37a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 680px; margin: 0 auto; padding: 40px 16px 64px; }
+    h1 { font-size: 1.8rem; line-height: 1.2; margin: 0 0 6px; }
+    h2 { font-size: 1.1rem; margin: 32px 0 12px; }
+    p { margin: 0 0 12px; }
+    .lede { color: var(--muted); margin-bottom: 28px; }
+    a { color: inherit; }
+    .boards { display: grid; gap: 10px; border: 0; padding: 0; margin: 0; }
+    .board {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px;
+      background: var(--card); cursor: pointer;
+    }
+    .board:has(input:checked) { border-color: var(--accent); background: var(--selected); }
+    .board input { margin-top: 5px; accent-color: var(--accent); }
+    .board strong { display: block; }
+    .board span { color: var(--muted); font-size: 0.92rem; }
+    .install { margin: 24px 0 8px; }
+    esp-web-install-button button[slot="activate"] {
+      font: inherit; font-weight: 600; padding: 12px 22px; border: 0; border-radius: 8px;
+      background: var(--accent); color: var(--accent-text); cursor: pointer;
+    }
+    .note { color: var(--warn); }
+    ol { padding-left: 1.3em; margin: 0; }
+    li { margin-bottom: 8px; }
+    code { font-size: 0.92em; background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+    footer { margin-top: 40px; color: var(--muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>CYD Ham Dashboard</h1>
+  <p class="lede">BricoHams edition. Flash the dashboard to an ESP32 Cheap Yellow Display straight from this page. Nothing to install.</p>
+
+  <h2>1. Choose your board</h2>
+  <fieldset class="boards">
+    <label class="board">
+      <input type="radio" name="board" value="esp32-2432s028r" checked>
+      <div><strong>2.8" ESP32-2432S028R – ILI9341</strong>
+      <span>The usual 2.8" CYD. Start here if you are not sure.</span></div>
+    </label>
+    <label class="board">
+      <input type="radio" name="board" value="esp32-2432s028r-st7789">
+      <div><strong>2.8" ESP32-2432S028R – ST7789</strong>
+      <span>Some newer 2.8" boards use this panel. Use it only if the ILI9341 build leaves the screen blank or with wrong colours.</span></div>
+    </label>
+    <label class="board">
+      <input type="radio" name="board" value="esp32-4in-st7796">
+      <div><strong>4.0" 320×480 – ST7796S</strong>
+      <span>The larger 4.0" Cheap Yellow Display.</span></div>
+    </label>
+  </fieldset>
+
+  <h2>2. Connect and flash</h2>
+  <p>Plug the board in with a USB <em>data</em> cable, then press the button and pick its serial port.</p>
+  <div class="install">
+    <esp-web-install-button id="installer" manifest="firmware/esp32-2432s028r/manifest.json">
+      <button slot="activate">Connect &amp; install</button>
+      <span slot="unsupported" class="note">Your browser can't flash devices. Use Chrome or Edge on a desktop computer.</span>
+      <span slot="not-allowed" class="note">Web Serial needs a secure (HTTPS) page.</span>
+    </esp-web-install-button>
+  </div>
+  <p id="version" class="lede"></p>
+
+  <h2>3. First start</h2>
+  <ol>
+    <li>After flashing, the board starts a Wi-Fi hotspot named <code>CYD-HamClock-Setup</code> (password <code>hamclock</code>).</li>
+    <li>Join it from your phone or computer. The setup page opens by itself; if it doesn't, browse to <code>http://192.168.4.1</code>.</li>
+    <li>Choose your home Wi-Fi network, then set your callsign, locator and time zone.</li>
+    <li>Once the board is on your network, open <code>http://cyd-ham.local/</code> or the IP shown on the screen to change settings.</li>
+  </ol>
+
+  <h2>Troubleshooting</h2>
+  <ol>
+    <li><strong>No serial port listed:</strong> install the CH340 USB driver and try another cable. Many cables only carry power.</li>
+    <li><strong>Connection fails:</strong> hold <code>BOOT</code> while you click Connect, and release it when flashing starts.</li>
+    <li><strong>Screen stays blank after flashing</strong> but the board joins Wi-Fi: flash the other 2.8" panel build.</li>
+    <li><strong>Start from scratch:</strong> hold <code>BOOT</code> for 5 seconds to reset all settings.</li>
+  </ol>
+
+  <footer>
+    Source, documentation and credits: <a href="https://github.com/anatolbricoham/Ham-Clock">GitHub</a>.
+    Based on the original project by HenrysCat, with thanks to EA5JEF, Diego.
+  </footer>
+</main>
+<script>
+  const installer = document.getElementById("installer");
+  const versionLine = document.getElementById("version");
+
+  async function selectBoard(env) {
+    const manifest = `firmware/${env}/manifest.json`;
+    installer.manifest = manifest;
+    installer.setAttribute("manifest", manifest);
+    try {
+      const res = await fetch(manifest, { cache: "no-cache" });
+      const data = await res.json();
+      versionLine.textContent = `Firmware ${data.version}`;
+    } catch {
+      versionLine.textContent = "";
+    }
+  }
+
+  for (const input of document.querySelectorAll('input[name="board"]')) {
+    input.addEventListener("change", () => selectBoard(input.value));
+  }
+  selectBoard(document.querySelector('input[name="board"]:checked').value);
+</script>
+</body>
+</html>
